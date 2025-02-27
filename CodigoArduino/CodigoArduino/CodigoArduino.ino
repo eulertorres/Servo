@@ -68,13 +68,24 @@ int preDesvioPWM = 0;
 
 // Função genérica para ler temperatura de um MCP9701A em qualquer pino analógico
 float readMCP9701A(uint8_t pin) {
-    uint16_t reading = analogRead(pin);
+
     // Conversão para tensão (assumindo referência de 5 V)
-    float readingVolts = (float)reading * 5.0 / 1023.0;
+    float readingVolts = (float)analogRead(pin) * 5.0 / 1023.0;
+
     // Fórmula para MCP9701A: (VOUT - 0,4 V) / 19,5 mV/°C
     float temperatureCelsius = (readingVolts - 0.4) / 0.0195;
+
     return temperatureCelsius;
 }
+
+float readACS712(const uint8_t sensorPin) {
+
+	float readingVolts = (float)analogRead(sensorPin) * 5.0 / 1023.0;
+	float readingAmps = (readingVolts - 2.5) / 0.185;
+
+	return readingAmps;
+}
+
  
 // Aplica PWM no servo
 void setServoPWM(int pwmValue) {
@@ -171,13 +182,14 @@ void updateOscillation() {
     }
 }
  
+
 // Amostragem e envio de dados pela Serial
 void sampleTask() {
     // Apenas amostra se algum teste estiver em andamento
     if (testARunning || testDRunning) {
+        
         // Leitura de corrente (ACS712)
-        int acsValue = analogRead(ACS712_PIN);
-        float currentMeasurement = acsValue;  // Ajuste a conversão conforme necessário
+        float currentMeasurement = readACS712(ACS712_PIN);  // Ajuste a conversão conforme necessário
 
         // Leitura dos dois sensores de temperatura
         float temperature1 = readMCP9701A(MCP9701A1_PIN);
