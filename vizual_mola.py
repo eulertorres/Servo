@@ -8,7 +8,7 @@ from matplotlib.patches import Rectangle, Arc
 # ---------------------------------------------------
 # VERIFICA SE O ARGUMENTO --D ESTÁ PRESENTE
 # ---------------------------------------------------
-DEBUG_MODE = ("--D" in sys.argv)
+DEBUG_MODE = ("-D" in sys.argv)
 
 # ---------------------------------------------------
 # CONSTANTES E FUNÇÕES AUXILIARES
@@ -59,7 +59,7 @@ def angle_between(v1, v2):
 # ---------------------------------------------------
 # FUNÇÃO PRINCIPAL DE CÁLCULO DO SISTEMA
 # ---------------------------------------------------
-def calcular_sistema(R, d, k, L0, L1, L2, anchor_y, tau_max, theta_graus):
+def calcular_sistema(R, d, k, L0, L1, L2, anchor_y, tau_max, theta_graus, leitura):
     """
     Só imprime dados de debug se DEBUG_MODE == True.
     """
@@ -99,7 +99,8 @@ def calcular_sistema(R, d, k, L0, L1, L2, anchor_y, tau_max, theta_graus):
         print(f"Delta (deformação da mola)         = {delta:.4f} m")
 
     # --- Tensão gerada pela mola ---
-    T = k * delta
+    T = k * delta + leitura
+    #T = k * delta
     if DEBUG_MODE:
         print(f"Tensão (T) = k * delta = {k:.1f} * {delta:.4f} = {T:.4f} N")
 
@@ -116,20 +117,25 @@ def calcular_sistema(R, d, k, L0, L1, L2, anchor_y, tau_max, theta_graus):
     # Cálculo de Fx e Fy "reais" em eixos globais X e Y
     # ---------------------------------------------------
     AO = vec_sub((0, 0), A)  # Vetor A->O
-    gamma_rads = 3.1415 - angle_between(AD, AO)
-    Fx_real = T * math.sin(gamma_rads)
-    Fy_real = T * math.cos(gamma_rads)
+    AO_defasado90 = rot90(AO)  # Rotaciona AO em 90°
+    gamma_rads = angle_between(AD, AO_defasado90)
+    alpha_rads = math.pi/2-gamma_rads
+    zeta_rads = angle_between(AD, AO) # A força é resultando do produto vetorial. 
+    Fservo = T * math.sin(zeta_rads)
+    Fx_real = Fservo * math.cos(gamma_rads)
+    Fy_real = Fservo * math.cos(alpha_rads)
 
     if DEBUG_MODE:
         print(f"AO = {AO},  |AO| = {vec_length(AO):.4f}")
         print(f"gamma_rads = {gamma_rads:.4f} rad = {math.degrees(gamma_rads):.4f}°")
-        print(f"Fx_real = {Fx_real:.4f} N")
-        print(f"Fy_real = {Fy_real:.4f} N")
+        print(f"Fx_real/Tração = {Fx_real*NEWTON_TO_KGF:.4f} Kgf")
+        print(f"Fy_real = {Fy_real*NEWTON_TO_KGF:.4f} kgf")
+        print(f"Fservo = {Fservo*NEWTON_TO_KGF:.4f} kgf")
 
     # ---------------------------------------------------
     # Torque no servo
     # ---------------------------------------------------
-    tau_Nm = abs(A[0]*Fy_real - A[1]*Fx_real)
+    tau_Nm = R*Fservo
     tau_kgfcm = tau_Nm / KGFCM_TO_NM
 
     if DEBUG_MODE:
@@ -189,21 +195,24 @@ def calcular_sistema(R, d, k, L0, L1, L2, anchor_y, tau_max, theta_graus):
         "u_torque": u_torque,
         "theta_rads": theta,
         "gamma_rads": gamma_rads,
-        "beta_rads": beta_rads
+        "beta_rads": beta_rads,
+        "gamme_rads": gamma_rads,
+        "Fservo": Fservo
     }
 
 # ---------------------------------------------------
 # PARÂMETROS GLOBAIS
 # ---------------------------------------------------
 PARAMS = {
-    "R": 0.02,
-    "d": 0.42,
-    "anchor_y": 0.035,
-    "k": 1167.0,
-    "L0": 0.05,
-    "L1": 0.36,
-    "L2": 0.001,
-    "tau_max": 20.0
+    "R": 0.02, #Cm
+    "d": 0.42, #Distania X ponto de ancoragem
+    "anchor_y": 0.035, #Distancia Y ponto de ancoragem
+    "k": 1167.0, # Contante elática da mola
+    "L0": 0.05,  # Tamanho mola sem carga
+    "L1": 0.36,  # Comprimento corda1 (cabo de aço + balança)
+    "L2": 0.001, # Comprimento corda 2 (cabo de aço entre mola e ponto de ancoragem)
+    "tau_max": 20.0, #Aepnas para referência torque máximo do servo
+    "Balanca": 0.370 #Peso do conjunto em repouso em Kg
 }
 theta_val = 0.0
 
@@ -218,7 +227,7 @@ ax_title.axis("off")
 ax_title.text(0.5, 0.5, "Parâmetros do Sistema\n(Depois clique em 'Apply')", 
               ha="center", va="center", fontsize=9)
 
-labels = ["R","d","anchor_y","k","L0","L1", "L2","tau_max"]
+labels = ["R","d","anchor_y","k","L0","L1", "L2","tau_max", "Balanca"]
 initials = [str(PARAMS[l]) for l in labels]
 textboxes = {}
 box_height = 0.07
@@ -229,7 +238,7 @@ for label,initv in zip(labels,initials):
     textboxes[label] = tb
     current_y -= (box_height+0.01)
 
-ax_btn_apply = fig_params.add_axes([0.3, 0.05, 0.4, 0.1])
+ax_btn_apply = fig_params.add_axes([0.3, 0.06, 0.4, 0.1])
 btn_apply = Button(ax_btn_apply,"Apply")
 
 def parse_float(txt, fallback=0.0):
@@ -257,8 +266,8 @@ ax.set_xlabel("x (m)", fontsize=10)
 ax.set_ylabel("y (m)", fontsize=10)
 
 # Parede (retângulo)
-wall_width = 0.05
-wall_height = 0.4
+wall_width = 0.025
+wall_height = 0.06
 wall_patch = Rectangle(
     (PARAMS["d"], PARAMS["anchor_y"] - wall_height/2),
     wall_width, wall_height,
@@ -269,9 +278,11 @@ wall_patch = Rectangle(
 )
 ax.add_patch(wall_patch)
 
+Servo_height = 0.02
+servo_width = 0.055
 # Servo (quadrado na origem)
 servo_patch = Rectangle(
-    (-0.05, -0.05), 0.1, 0.1,
+    (-servo_width/2 + 0.001, -Servo_height/2), servo_width, Servo_height,
     facecolor='lightblue',
     edgecolor='blue',
     label='Servo'
@@ -391,7 +402,8 @@ def update_main_figure(_=None):
         L2=PARAMS["L2"],
         anchor_y=PARAMS["anchor_y"],
         tau_max=PARAMS["tau_max"],
-        theta_graus=theta_val
+        theta_graus=theta_val,
+        leitura=PARAMS["Balanca"],
     )
     
     A = res["A"]
@@ -408,15 +420,15 @@ def update_main_figure(_=None):
     
     Fx = res["Fx_real"]
     Fy = res["Fy_real"]
-    T_val = res["T"]
-    T_kgf = T_val * NEWTON_TO_KGF
+    Fservo_val = res["Fservo"]
+    T_kgf = Fservo_val * NEWTON_TO_KGF
 
     # Vetor AD e vetores unitários para desenhar setas
     AD = vec_sub(D, A)
     u_rope = vec_unit(AD)
     u_rope_perp = rot90(u_rope)
 
-    if T_val > 1e-9:
+    if Fservo_val > 1e-9:
         # -- Desenho da seta Fx (no sentido da corda) --
         vec_fx = vec_scale(u_rope, -Fx)
         arrow_Fx = ax.arrow(
@@ -430,12 +442,12 @@ def update_main_figure(_=None):
         txt_Fx = ax.text(
             tip_fx[0], tip_fx[1],
             f"Fx={abs(Fx*NEWTON_TO_KGF):.2f} kgf",
-            color='blue', fontsize=8, ha='center', va='center',
+            color='blue', fontsize=7, ha='center', va='center',
             bbox=dict(boxstyle="round", fc="white", ec="blue", alpha=0.6)
         )
         
         # -- Desenho da seta Fy (perpendicular ao cabo) --
-        vec_fy = vec_scale(u_rope_perp, Fy)
+        vec_fy = vec_scale(u_rope_perp, -Fy)
         arrow_Fy = ax.arrow(
             A[0], A[1],
             vec_fy[0]*force_scale_val, vec_fy[1]*force_scale_val,
@@ -447,26 +459,24 @@ def update_main_figure(_=None):
         txt_Fy = ax.text(
             tip_fy[0], tip_fy[1],
             f"Fy={abs(Fy*NEWTON_TO_KGF):.2f} kgf",
-            color='orange', fontsize=8, ha='center', va='center',
+            color='orange', fontsize=7, ha='center', va='center',
             bbox=dict(boxstyle="round", fc="white", ec="orange", alpha=0.6)
         )
         
         # -- Desenho da seta representando a força de torque --
-        Ft_mag = res["torqueForce_mag"]
-        Ft_kgf = Ft_mag * NEWTON_TO_KGF
         u_t = res["u_torque"]
         arrow_torque = ax.arrow(
             A[0], A[1],
-            u_t[0]*T_val*force_scale_val, u_t[1]*T_val*force_scale_val,
+            u_t[0]*Fservo_val*force_scale_val, u_t[1]*Fservo_val*force_scale_val,
             head_width=0.007, head_length=0.01,
             fc='magenta', ec='magenta'
         )
-        tip_torque = (A[0] + u_t[0]*T_val*force_scale_val*1.1,
-                      A[1] + u_t[1]*T_val*force_scale_val*1.1)
+        tip_torque = (A[0] + u_t[0]*Fservo_val*force_scale_val*1.1,
+                      A[1] + u_t[1]*Fservo_val*force_scale_val*1.1)
         txt_torque = ax.text(
             tip_torque[0], tip_torque[1],
-            f"Tq={T_val*NEWTON_TO_KGF:.2f} kgf",
-            color='magenta', fontsize=8, ha='center', va='center',
+            f"Tq={Fservo_val*NEWTON_TO_KGF:.2f} kgf",
+            color='magenta', fontsize=7, ha='center', va='center',
             bbox=dict(boxstyle="round", fc="white", ec="magenta", alpha=0.6)
         )
 
@@ -477,13 +487,13 @@ def update_main_figure(_=None):
     # 1) theta em torno da origem (0,0)
     theta_rads = res["theta_rads"]
     theta_degs = math.degrees(theta_rads)
-    arc_theta = Arc((0,0), 0.4, 0.4,  # tamanho do arco
+    arc_theta = Arc((0,0),PARAMS["R"]*2, PARAMS["R"]*2,  # tamanho do arco
                     angle=0,
                     theta1=0, theta2=theta_degs,
                     color='red', lw=2)
     ax.add_patch(arc_theta)
     mid_theta = theta_rads/2
-    r_ = 0.25
+    r_ = 0.04
     x_txt = r_*math.cos(mid_theta)
     y_txt = r_*math.sin(mid_theta)
     txt_theta = ax.text(x_txt, y_txt, 
@@ -492,57 +502,48 @@ def update_main_figure(_=None):
                         ha='center', va='center')
 
     # 2) gamma em torno de A, entre AO e AD
-    angle_AO_deg = math.degrees(math.atan2(-A[1], -A[0]))  # AO = ( -A[0], -A[1] )
-    angle_AD_deg = math.degrees(math.atan2(AD[1], AD[0]))
-    start_g = min(angle_AO_deg, angle_AD_deg)
-    end_g   = max(angle_AO_deg, angle_AD_deg)
-
+    gamma_rads= res["gamma_rads"]
+    gamma_degs = math.degrees(gamma_rads)
     arc_gamma = Arc(
-        A, 0.2, 0.2,
-        angle=0,
-        theta1=start_g,
-        theta2=end_g,
+        A, PARAMS["R"]*2, PARAMS["R"]*2,
+        angle=theta_degs+90,
+        theta1=-gamma_degs,
+        theta2=0,
         color='purple', lw=2
     )
     ax.add_patch(arc_gamma)
 
-    meio_g_deg = (start_g + end_g)/2
-    meio_g_rad = math.radians(meio_g_deg)
-    r_g = 0.18
+    meio_g_rad = gamma_rads/2
+    r_g = 0.05
     x_gamma = A[0] + r_g*math.cos(meio_g_rad)
     y_gamma = A[1] + r_g*math.sin(meio_g_rad)
     txt_gamma = ax.text(
         x_gamma, y_gamma,
-        f"γ={abs(end_g - start_g):.1f}°",
+        f"γ={gamma_degs:.1f}°",
         color='purple', fontsize=8,
         ha='center', va='center'
     )
 
     # 3) beta em torno de D, entre vertical (90°) e CD
-    C = res["C"]
-    CD = vec_sub(D, C)
-    angle_vert = 90.0
-    angle_CD_deg = math.degrees(math.atan2(CD[1], CD[0]))
-    start_b = min(angle_vert, angle_CD_deg)
-    end_b   = max(angle_vert, angle_CD_deg)
-
+    beta_rads = res["beta_rads"]
+    beta_degs = math.degrees(beta_rads)
     arc_beta = Arc(
-        D, 0.2, 0.2,
-        angle=0,
-        theta1=start_b,
-        theta2=end_b,
+        D, 0.05, 0.05,
+        angle=-90,
+        theta1=-beta_degs,
+        theta2=0,
         color='green', lw=2
     )
     ax.add_patch(arc_beta)
 
-    meio_b_deg = (start_b + end_b)/2
+    meio_b_deg = beta_degs/2
     meio_b_rad = math.radians(meio_b_deg)
-    r_b = 0.18
+    r_b = 0.05
     x_beta = D[0] + r_b*math.cos(meio_b_rad)
     y_beta = D[1] + r_b*math.sin(meio_b_rad)
     txt_beta = ax.text(
         x_beta, y_beta,
-        f"β={abs(end_b - start_b):.1f}°",
+        f"β={meio_b_deg:.1f}°",
         color='green', fontsize=8,
         ha='center', va='center'
     )
@@ -552,10 +553,10 @@ def update_main_figure(_=None):
     # ---------------------------------------------------
     info_text.set_text(
        f"θ = {theta_val:.1f}°\n"
-       f"Tensão (T) = {T_val:.1f} N = {T_kgf:.2f} kgf\n"
+       f"Tensão (T) = {Fservo_val:.1f} N = {T_kgf:.2f} kgf\n"
        f"Delta (mola) = {res['delta']*1000:.1f} mm\n"
-       f"Fx = {Fx:.2f} N\n"
-       f"Fy = {Fy:.2f} N\n"
+       f"Fx (Balança)= {Fx*NEWTON_TO_KGF:.2f} Kgf\n"
+       f"Fy = {Fy*NEWTON_TO_KGF:.2f} Kgf\n"
        f"Torque = {res['tau_kgfcm']:.2f} kgf·cm\n"
        f"τ_max = {PARAMS['tau_max']:.2f} kgf·cm\n"
        f"Escala Força = {force_scale_val:g}"
@@ -565,8 +566,8 @@ def update_main_figure(_=None):
     else:
         info_text.set_color('black')
     
-    ax.set_xlim(-0.3, 1.3)
-    ax.set_ylim(-0.2, 0.8)
+    ax.set_xlim(-0.2, 0.6)
+    ax.set_ylim(-0.1, 0.15)
     ax.set_aspect('equal', 'box')
 
     fig_ani.canvas.draw_idle()
