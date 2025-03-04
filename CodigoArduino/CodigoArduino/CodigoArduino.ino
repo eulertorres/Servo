@@ -5,10 +5,10 @@
 #define SERVO_PIN       9    // Pino de controle do servo
 #define MCP9701A1_PIN   A0   // Primeiro sensor de temperatura
 #define MCP9701A2_PIN   A1   // Segundo sensor de temperatura (adicionado)
-#define ACS712_PIN      A2   // Pino analógico para sensor de corrente (realocado)
+#define ACS712_PIN      A5   // Pino analógico para sensor de corrente (realocado)
 
 // Se verdadeiro, o "stop" coloca o servo em PWM_max em vez de PWM_min
-#define INVERTE true
+#define INVERTE false
  
 // ---------------------- Variáveis e constantes -----------------
 Servo servo;
@@ -20,9 +20,9 @@ const float angle_min = 0;
 const float angle_max = 100;
  
 // Parâmetros gerais do teste
-const float angle_plus = 40;   // Offset + em graus
-const float angle_minus = 40;  // Offset - em graus
-int   neutralPWM = 1515;         // Neutro definido diretamente em PWM
+const float angle_plus = 51.22;   // Offset + em graus
+const float angle_minus = 0;  // Offset - em graus
+int   neutralPWM = 1050;         // Neutro definido diretamente em PWM
 const float speed = 10;          // Velocidade em °/s
 float stepPWM = 1;               // Movimento suave (passo)
  

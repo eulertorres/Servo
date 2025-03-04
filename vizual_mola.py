@@ -99,10 +99,9 @@ def calcular_sistema(R, d, k, L0, L1, L2, anchor_y, tau_max, theta_graus, leitur
         print(f"Delta (deformação da mola)         = {delta:.4f} m")
 
     # --- Tensão gerada pela mola ---
-    T = k * delta + leitura
-    #T = k * delta
+    T = k * delta + leitura  # soma a leitura da "balança" como offset, se desejar
     if DEBUG_MODE:
-        print(f"Tensão (T) = k * delta = {k:.1f} * {delta:.4f} = {T:.4f} N")
+        print(f"Tensão (T) = k * delta = {k:.1f} * {delta:.4f} + leitura = {T:.4f} N")
 
     # Direção (unitária) A->D (ou seja, da corda)
     u_rope = vec_unit(AD)
@@ -119,8 +118,8 @@ def calcular_sistema(R, d, k, L0, L1, L2, anchor_y, tau_max, theta_graus, leitur
     AO = vec_sub((0, 0), A)  # Vetor A->O
     AO_defasado90 = rot90(AO)  # Rotaciona AO em 90°
     gamma_rads = angle_between(AD, AO_defasado90)
-    alpha_rads = math.pi/2-gamma_rads
-    zeta_rads = angle_between(AD, AO) # A força é resultando do produto vetorial. 
+    alpha_rads = math.pi/2 - gamma_rads
+    zeta_rads = angle_between(AD, AO) # A força é resultante do produto vetorial. 
     Fservo = T * math.sin(zeta_rads)
     Fx_real = Fservo * math.cos(gamma_rads)
     Fy_real = Fservo * math.cos(alpha_rads)
@@ -135,7 +134,7 @@ def calcular_sistema(R, d, k, L0, L1, L2, anchor_y, tau_max, theta_graus, leitur
     # ---------------------------------------------------
     # Torque no servo
     # ---------------------------------------------------
-    tau_Nm = R*Fservo
+    tau_Nm = R * Fservo
     tau_kgfcm = tau_Nm / KGFCM_TO_NM
 
     if DEBUG_MODE:
@@ -156,7 +155,6 @@ def calcular_sistema(R, d, k, L0, L1, L2, anchor_y, tau_max, theta_graus, leitur
     proj_par_arm = vec_scale(u_arm, vec_dot(F_total, u_arm))
     F_perp_arm_vec = vec_sub(F_total, proj_par_arm)
     torqueForce_mag = vec_length(F_perp_arm_vec)
-
     if torqueForce_mag > 1e-9:
         u_torque = vec_unit(vec_scale(F_perp_arm_vec, -1.0))
     else:
@@ -196,7 +194,7 @@ def calcular_sistema(R, d, k, L0, L1, L2, anchor_y, tau_max, theta_graus, leitur
         "theta_rads": theta,
         "gamma_rads": gamma_rads,
         "beta_rads": beta_rads,
-        "gamme_rads": gamma_rads,
+        "gamme_rads": gamma_rads,  # (parece duplicado, mas está no código original)
         "Fservo": Fservo
     }
 
@@ -204,15 +202,15 @@ def calcular_sistema(R, d, k, L0, L1, L2, anchor_y, tau_max, theta_graus, leitur
 # PARÂMETROS GLOBAIS
 # ---------------------------------------------------
 PARAMS = {
-    "R": 0.02, #Cm
-    "d": 0.42, #Distania X ponto de ancoragem
-    "anchor_y": 0.035, #Distancia Y ponto de ancoragem
-    "k": 1167.0, # Contante elática da mola
-    "L0": 0.05,  # Tamanho mola sem carga
-    "L1": 0.36,  # Comprimento corda1 (cabo de aço + balança)
-    "L2": 0.001, # Comprimento corda 2 (cabo de aço entre mola e ponto de ancoragem)
-    "tau_max": 20.0, #Aepnas para referência torque máximo do servo
-    "Balanca": 0.370 #Peso do conjunto em repouso em Kg
+    "R": 0.02,      # Raio do braço do servo
+    "d": 0.42,      # Distância em X do ponto de ancoragem
+    "anchor_y": 0.035, # Distância em Y do ponto de ancoragem
+    "k": 1167.0,    # Constante elástica da mola
+    "L0": 0.05,     # Tamanho da mola sem carga
+    "L1": 0.36,     # Comprimento corda1 (cabo + balança)
+    "L2": 0.001,    # Comprimento corda 2 (entre mola e ancoragem)
+    "tau_max": 20.0,# Torque máximo do servo (referência)
+    "Balanca": 0.370# Valor (N) que você está somando como "leitura" (caso queira simular)
 }
 theta_val = 0.0
 
@@ -250,7 +248,8 @@ def parse_float(txt, fallback=0.0):
 def on_apply(event):
     for l in labels:
         PARAMS[l] = parse_float(textboxes[l].text, PARAMS[l])
-    update_main_figure()
+    update_main_figure()  # atualiza a simulação
+    update_torque_plot()  # e também o gráfico de torque
 
 btn_apply.on_clicked(on_apply)
 
@@ -392,7 +391,7 @@ def update_main_figure(_=None):
     theta_val = slider_angle.val
     force_scale_val = slider_force_scale.val
     
-    # ---- Chama a função de cálculo (com prints só se --D) ----
+    # ---- Chama a função de cálculo ----
     res = calcular_sistema(
         R=PARAMS["R"],
         d=PARAMS["d"],
@@ -483,13 +482,11 @@ def update_main_figure(_=None):
     # ---------------------------------------------------
     # Arcos e textos de ângulos (theta, gamma, beta)
     # ---------------------------------------------------
-
     # 1) theta em torno da origem (0,0)
     theta_rads = res["theta_rads"]
     theta_degs = math.degrees(theta_rads)
-    arc_theta = Arc((0,0),PARAMS["R"]*2, PARAMS["R"]*2,  # tamanho do arco
-                    angle=0,
-                    theta1=0, theta2=theta_degs,
+    arc_theta = Arc((0,0), PARAMS["R"]*2, PARAMS["R"]*2,
+                    angle=0, theta1=0, theta2=theta_degs,
                     color='red', lw=2)
     ax.add_patch(arc_theta)
     mid_theta = theta_rads/2
@@ -575,6 +572,79 @@ def update_main_figure(_=None):
 slider_angle.on_changed(update_main_figure)
 slider_force_scale.on_changed(update_main_figure)
 
+# ---------------------------------------------------
+# CRIANDO UMA JANELA PARA O GRÁFICO TORQUE x ÂNGULO
+# ---------------------------------------------------
+fig_torque, ax_torque = plt.subplots()
+fig_torque.canvas.manager.set_window_title("Torque x Ângulo")
+ax_torque.set_title("Torque (kgf·cm) vs. Ângulo do Servo (graus)")
+ax_torque.set_xlabel("Ângulo (°)")
+ax_torque.set_ylabel("Torque (kgf·cm)")
+
+# Linha do gráfico de torque
+line_torque, = ax_torque.plot([], [], label="Torque")
+# Marcador do torque atual
+marker_torque, = ax_torque.plot([], [], 'ro', label="Ângulo atual")
+
+ax_torque.legend(loc='best')
+
+def update_torque_plot():
+    """
+    Atualiza o gráfico de Torque x Ângulo (0 a 180°).
+    E reposiciona o marcador no ângulo atual do slider.
+    """
+    # Prepara vetores de ângulo e torque
+    theta_array = np.arange(0, 181, 1)  # de 0° a 180°, passo de 1°
+    torque_array = []
+    for ang in theta_array:
+        res_ = calcular_sistema(
+            R=PARAMS["R"],
+            d=PARAMS["d"],
+            k=PARAMS["k"],
+            L0=PARAMS["L0"],
+            L1=PARAMS["L1"],
+            L2=PARAMS["L2"],
+            anchor_y=PARAMS["anchor_y"],
+            tau_max=PARAMS["tau_max"],
+            theta_graus=ang,
+            leitura=PARAMS["Balanca"],
+        )
+        torque_array.append(res_["tau_kgfcm"])
+    
+    # Atualiza a linha do gráfico
+    line_torque.set_data(theta_array, torque_array)
+    
+    # Para ajustar o range dos eixos
+    ax_torque.relim()
+    ax_torque.autoscale_view()
+
+    # Agora, calcula o torque no ângulo atual (do slider)
+    ang_atual = slider_angle.val
+    res_atual = calcular_sistema(
+        R=PARAMS["R"],
+        d=PARAMS["d"],
+        k=PARAMS["k"],
+        L0=PARAMS["L0"],
+        L1=PARAMS["L1"],
+        L2=PARAMS["L2"],
+        anchor_y=PARAMS["anchor_y"],
+        tau_max=PARAMS["tau_max"],
+        theta_graus=ang_atual,
+        leitura=PARAMS["Balanca"]
+    )
+    torque_atual = res_atual["tau_kgfcm"]
+    
+    # Atualiza posição do marcador
+    marker_torque.set_data([ang_atual], [torque_atual])
+
+    # Força redesenho
+    fig_torque.canvas.draw_idle()
+
+# Sempre que o ângulo mudar, atualiza também o gráfico
+slider_angle.on_changed(lambda val: update_torque_plot())
+
 # Primeira atualização
 update_main_figure()
+update_torque_plot()
+
 plt.show()
