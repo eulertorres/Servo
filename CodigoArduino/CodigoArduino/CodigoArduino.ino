@@ -20,9 +20,9 @@ const float angle_min = 0;
 const float angle_max = 100;
 
 // Parâmetros gerais do teste
-float angle_plus = 51.22;   // Offset + em graus (pode ser alterado via Serial com +XX)
+float angle_plus = 17.02;   // Offset + em graus (pode ser alterado via Serial com +XX)
 float angle_minus = 0;      // Offset - em graus (pode ser alterado via Serial com -XX)
-int   neutralPWM = 1050;    // Neutro definido diretamente em PWM
+int   neutralPWM = 1000;    // Neutro definido diretamente em PWM
 float speed = 10;           // Velocidade em °/s (pode ser alterado via Serial com vXX)
 float stepPWM = 1;          // Movimento suave (passo)
 
@@ -38,6 +38,7 @@ int pwm_minus;
 // Booleans para controle dos testes
 bool testARunning = false;
 bool testDRunning = false;
+bool testFRunning = false;
 
 // Variáveis de oscilação
 int currentPWM = 0;
@@ -52,17 +53,33 @@ const unsigned long sampleInterval = 250; // Intervalo de amostragem (ms)
 // Controle de tempo do teste
 unsigned long testStartTime = 0;
 
-// ---------- Parâmetros do teste "d" -----------
+// ---------- Parâmetros do teste "d" e "f" -----------
 // - A cada 'desvioIntervalMin' minutos, desviar para 'desvioPWM' por 'desvioDurationSec' segundos
-float desvioIntervalMin = 0.1;    // 0.1 min = 6s (exemplo)
-float desvioDurationSec = 2.0;    // Duração do desvio, em segundos
-const float AnguloCritico = 0.5;  // Em graus
+float desvioIntervalMin = 0.3;    // 0.1 min = 6s (exemplo)
+float desvioDurationSec = 20;    // Duração do desvio, em segundos
+const float AnguloCritico = 0;  // Em graus
 // Converte ângulo crítico p/ PWM: (AnguloCritico * (1/res)) + PWM_min
 int desvioPWM = 0;
 bool desvioActive = false;
 unsigned long lastDesvioTime = 0;
+unsigned long lastDesvioTime2 = 0;
 unsigned long desvioStartTime = 0;
 int preDesvioPWM = 0;
+
+// ----------- Parâmetros do teste "f" -----------
+// Offsets para o teste F
+float angle_plusF = 0;   // Offset + em graus para teste F
+float angle_minusF = 51.22;      // Offset - em graus para teste F
+int lastNeutralPWM = 1000;
+float lastangle_plus = angle_plus;
+float lastangle_minus = angle_minus;
+
+// ---------- Variáveis de transição para o Teste F ----------
+// Estados da transição entre oscilação normal e com desvio F
+enum TransitionState { NO_TRANSITION, TRANSITION_TO_F, TRANSITION_FROM_F };
+TransitionState transitionState = NO_TRANSITION;
+unsigned long transitionStartTime = 0; // Momento que a transição começou
+unsigned long transitionDuration = 0;    // Duração da transição (em ms)
 
 // -------------------- Funções auxiliares --------------------
 
@@ -135,9 +152,12 @@ void processSerial() {
                 // Para qualquer teste se definimos PWM diretamente
                 testARunning = false;
                 testDRunning = false;
+                testFRunning = false;
                 desvioActive = false;
+                transitionState = NO_TRANSITION;
 
                 neutralPWM = pwmValue;
+                lastNeutralPWM = neutralPWM;
                 currentPWM = neutralPWM;
                 setServoPWM(currentPWM);
                 int angleVal = pwmToAngle(currentPWM);
@@ -157,8 +177,13 @@ void processSerial() {
                 // Inicia teste A
                 testARunning   = true;
                 testDRunning   = false;
+                testFRunning   = false;
                 desvioActive   = false;
+                transitionState = NO_TRANSITION;
                 currentPWM     = neutralPWM;
+                angle_plus = lastangle_plus;
+                angle_minus = lastangle_minus;
+                recalcularVariaveis();
                 direction      = 1;
                 testStartTime  = millis();
                 lastDesvioTime = testStartTime; // Só pra zerar
@@ -168,27 +193,51 @@ void processSerial() {
                 // Inicia teste D
                 testARunning   = false;
                 testDRunning   = true;
+                testFRunning   = false;
                 desvioActive   = false;
+                transitionState = NO_TRANSITION;
                 currentPWM     = neutralPWM;
+                angle_plus = lastangle_plus;
+                angle_minus = lastangle_minus;
+                recalcularVariaveis();
                 direction      = 1;
                 testStartTime  = millis();
                 lastDesvioTime = testStartTime; // zera para começar a contagem
-                Serial.println("Teste D iniciado (desvios periódicos).");
+                Serial.println("Teste D iniciado (desvios periódicos, estaticos).");
+            }
+            else if (cmd == 'f') {
+                // Inicia teste F
+                testARunning   = false;
+                testDRunning   = false;
+                testFRunning   = true;
+                desvioActive   = false;
+                transitionState = NO_TRANSITION;
+                currentPWM     = neutralPWM;
+                // Reinicia os offsets para os valores normais
+                angle_plus = lastangle_plus;
+                angle_minus = lastangle_minus;
+                recalcularVariaveis();
+                direction      = 1;
+                testStartTime  = millis();
+                lastDesvioTime = testStartTime; // zera para começar a contagem
+                Serial.println("Teste F iniciado (desvios periódicos, oscilatórios com transição suave).");
             }
             else if (cmd == 's') {
                 // Stop
                 testARunning = false;
                 testDRunning = false;
+                testFRunning = false;
                 desvioActive = false;
+                transitionState = NO_TRANSITION;
                 currentPWM   = INVERTE ? (int)PWM_max : (int)PWM_min;
                 setServoPWM(currentPWM);
                 Serial.println("Teste interrompido.");
             }
-            // Novos comandos de personalização
             else if (cmd == '+') {
                 // Define angle_plus (lê float após o '+')
                 float val = Serial.parseFloat();
                 angle_plus = val;
+                lastangle_plus = angle_plus;
                 recalcularVariaveis();
                 Serial.print("Novo angle_plus = ");
                 Serial.println(angle_plus);
@@ -197,6 +246,7 @@ void processSerial() {
                 // Define angle_minus (lê float após o '-')
                 float val = Serial.parseFloat();
                 angle_minus = val;
+                lastangle_minus = angle_minus;
                 recalcularVariaveis();
                 Serial.print("Novo angle_minus = ");
                 Serial.println(angle_minus);
@@ -212,7 +262,7 @@ void processSerial() {
             }
             // Se não for nenhuma das opções conhecidas, apenas descarta
             else {
-                // Opcionalmente, você pode imprimir algo como "Comando desconhecido"
+                //Serial.println("COMANDO NÃO RECONHECIDO");
             }
         }
     }
@@ -243,7 +293,7 @@ void updateOscillation() {
 // Amostragem e envio de dados pela Serial
 void sampleTask() {
     // Apenas amostra se algum teste estiver em andamento
-    if (testARunning || testDRunning) {
+    if (testARunning || testDRunning || testFRunning) {
         // Leitura de corrente (ACS712)
         float currentMeasurement = readACS712(ACS712_PIN);
 
@@ -296,19 +346,14 @@ void setup() {
     Serial.println("=== Sistema Iniciado ===");
     Serial.println("COMANDOS DISPONÍVEIS:");
     Serial.println(" - a: Inicia Teste A (oscilacao simples)");
-    Serial.println(" - d: Inicia Teste D (desvios periodicos)");
+    Serial.println(" - d: Inicia Teste D (desvios periodicos estaticos)");
+    Serial.println(" - f: Inicia Teste F (desvios periodicos dinamicos com transição suave)");
     Serial.println(" - s: Stop (para e coloca servo em PWM_min ou PWM_max se INVERTE=true)");
     Serial.println(" - 1000..2000: Define diretamente o PWM do servo (ex: 1500)");
     Serial.println(" - +XX.xx: Define angle_plus em graus (ex: +35.4 -> 35.4 graus)");
     Serial.println(" - -XX.xx: Define angle_minus em graus (ex: -18  -> 18 graus)");
     Serial.println(" - vXX.xx: Define speed em graus/s (ex: v40   -> 40 graus/s)");
     Serial.println("=========================================");
-
-    // Exibir variáveis iniciais
-    Serial.print("res = "); Serial.println(res);
-    Serial.print("delay_ms = "); Serial.println(delay_ms);
-    Serial.print("desvioPWM = "); Serial.println(desvioPWM);
-    Serial.println("========================");
 }
 
 void loop() {
@@ -317,11 +362,13 @@ void loop() {
 
     // ======================== TESTE A =========================
     if (testARunning) {
+        neutralPWM = lastNeutralPWM;
         updateOscillation();
     }
 
     // ======================== TESTE D =========================
     if (testDRunning) {
+        neutralPWM = lastNeutralPWM;
         // 1) Se estamos em desvio, verificar se já acabou o tempo
         if (desvioActive) {
             unsigned long now = millis();
@@ -332,8 +379,10 @@ void loop() {
                 desvioActive = false;
                 currentPWM   = preDesvioPWM; // Volta de onde parou
                 setServoPWM(currentPWM);
-                // Marca quando acabou este desvio
                 lastDesvioTime = now;
+            }
+            else {
+                updateOscillation();
             }
         }
         else {
@@ -342,17 +391,83 @@ void loop() {
             unsigned long desvioIntervalMs = (unsigned long)(desvioIntervalMin * 60.0 * 1000.0);
 
             if ((now - lastDesvioTime) >= desvioIntervalMs) {
-                // Inicia o desvio
+                // Inicia o desvio imediatamente (teste D: desvio estático)
                 desvioActive     = true;
                 preDesvioPWM     = currentPWM;   // guarda PWM atual para voltar depois
                 desvioStartTime  = now;
-
-                // Move o servo para desvio
                 currentPWM = desvioPWM;
                 setServoPWM(currentPWM);
             }
             else {
-                // Se não é hora de desvio, faz a mesma oscilação do teste "a"
+                updateOscillation();
+            }
+        }
+    }
+
+    // ======================== TESTE F =========================
+    if (testFRunning) {
+        neutralPWM = lastNeutralPWM;
+        unsigned long now = millis();
+        unsigned long desvioIntervalMs = (unsigned long)(desvioIntervalMin * 60.0 * 1000.0);
+
+        // Fases de transição para o Teste F:
+        if (transitionState == TRANSITION_TO_F) {
+            // Transição dos offsets normais para os offsets F
+            unsigned long elapsed = now - transitionStartTime;
+            float t = (float)elapsed / transitionDuration;
+            if (t >= 1.0) {
+                t = 1.0;
+                transitionState = NO_TRANSITION;
+                desvioActive = true;
+                desvioStartTime = now;
+                preDesvioPWM = currentPWM;
+            }
+            angle_plus = lastangle_plus + t * (angle_plusF - lastangle_plus);
+            angle_minus = lastangle_minus + t * (angle_minusF - lastangle_minus);
+            recalcularVariaveis();
+            updateOscillation();
+        }
+        else if (transitionState == TRANSITION_FROM_F) {
+            // Transição dos offsets F de volta para os offsets normais
+            unsigned long elapsed = now - transitionStartTime;
+            float t = (float)elapsed / transitionDuration;
+            if (t >= 1.0) {
+                t = 1.0;
+                transitionState = NO_TRANSITION;
+                desvioActive = false;
+                lastDesvioTime = now;  // marca o fim do desvio
+            }
+            angle_plus = angle_plusF + t * (lastangle_plus - angle_plusF);
+            angle_minus = angle_minusF + t * (lastangle_minus - angle_minusF);
+            recalcularVariaveis();
+            updateOscillation();
+        }
+        else if (desvioActive) {
+            // Estamos na fase de desvio com offsets F definidos
+            updateOscillation();
+            unsigned long desvioDurationMs = (unsigned long)(desvioDurationSec * 1000.0);
+            if ((now - desvioStartTime) >= desvioDurationMs) {
+                // Ao terminar o desvio, inicia a transição de retorno
+                transitionState = TRANSITION_FROM_F;
+                transitionStartTime = now;
+                float diff_plus = fabs(angle_plusF - lastangle_plus);
+                float diff_minus = fabs(angle_minusF - lastangle_minus);
+                float maxDiff = (diff_plus > diff_minus ? diff_plus : diff_minus);
+                transitionDuration = (unsigned long)((maxDiff / speed) * 1000);
+            }
+        }
+        else {
+            // Se não estamos em desvio nem em transição: verifica se é hora de iniciar o desvio
+            if ((now - lastDesvioTime) >= desvioIntervalMs) {
+                // Inicia a transição para os offsets F
+                transitionState = TRANSITION_TO_F;
+                transitionStartTime = now;
+                float diff_plus = fabs(angle_plusF - lastangle_plus);
+                float diff_minus = fabs(angle_minusF - lastangle_minus);
+                float maxDiff = (diff_plus > diff_minus ? diff_plus : diff_minus);
+                transitionDuration = (unsigned long)((maxDiff / speed) * 1000);
+            }
+            else {
                 updateOscillation();
             }
         }
