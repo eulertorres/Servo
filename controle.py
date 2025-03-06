@@ -245,7 +245,7 @@ def write_serial(port):
             continue
         
         # Se for 'a' ou 'd', iniciamos um novo teste
-        if cmd == 'a' or cmd == 'd':
+        if cmd == 'a' or cmd == 'd' or cmd == 'f':
             start_test(port, cmd)  # Cria novo CSV e envia comando
         elif cmd == 's':
             # Para o teste

@@ -20,7 +20,7 @@ const float angle_min = 0;
 const float angle_max = 100;
 
 // Parâmetros gerais do teste
-float angle_plus = 17.02;   // Offset + em graus (pode ser alterado via Serial com +XX)
+float angle_plus = 16.41;   // Offset + em graus (pode ser alterado via Serial com +XX)
 float angle_minus = 0;      // Offset - em graus (pode ser alterado via Serial com -XX)
 int   neutralPWM = 1000;    // Neutro definido diretamente em PWM
 float speed = 10;           // Velocidade em °/s (pode ser alterado via Serial com vXX)
@@ -55,8 +55,8 @@ unsigned long testStartTime = 0;
 
 // ---------- Parâmetros do teste "d" e "f" -----------
 // - A cada 'desvioIntervalMin' minutos, desviar para 'desvioPWM' por 'desvioDurationSec' segundos
-float desvioIntervalMin = 0.3;    // 0.1 min = 6s (exemplo)
-float desvioDurationSec = 20;    // Duração do desvio, em segundos
+float desvioIntervalMin = 19;    // 0.1 min = 6s (exemplo)
+float desvioDurationSec = 60;    // Duração do desvio, em segundos
 const float AnguloCritico = 0;  // Em graus
 // Converte ângulo crítico p/ PWM: (AnguloCritico * (1/res)) + PWM_min
 int desvioPWM = 0;
