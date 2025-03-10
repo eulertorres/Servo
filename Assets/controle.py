@@ -5,12 +5,11 @@ import time
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
 from threading import Lock
+import sys
 
 # ------------------------- CONFIGURACOES -------------------------
 # Tempo máximo do teste (em minutos). Ao ultrapassar, envia 's'
 max_time_minutes = 480.0  # Exemplo: 1 minuto
-# Porta serial onde seu Arduino está conectado
-PORTA_SERIAL = "COM9"
 # Velocidade de comunicação
 BAUDRATE = 115200
 # -----------------------------------------------------------------
@@ -76,7 +75,7 @@ def create_new_csv_file():
 def stop_test(port=None):
     global current_csv_file, recording, test_stopped
     
-    print("Encerrando teste (mesmo que ja estivesse parado).")
+    print("Encerrando teste (mesmo que já estivesse parado).")
     test_stopped = True
     recording = False
     
@@ -90,9 +89,9 @@ def stop_test(port=None):
 
 def start_test(port, cmd):
     """
-    Inicia um teste (A ou D).
+    Inicia um teste (A ou D, por exemplo).
     - Cria novo CSV, limpa dados de plot, zera variáveis de controle.
-    - Envia comando 'cmd' para a placa ('a' ou 'd').
+    - Envia comando 'cmd' para a placa ('a', 'd' etc.).
     """
     global times_list, servo_temps_list, ambient_temps_list, currents_list
     
@@ -124,7 +123,7 @@ def read_serial(port):
             try:
                 line = port.readline().decode('utf-8', errors='ignore').strip()
                 if line:
-                    # Pode conter multiplas linhas juntas, se enviadas muito rápido
+                    # Pode conter múltiplas linhas juntas, se enviadas muito rápido
                     lines = line.split("\n")
                     for l in lines:
                         l = l.strip()
@@ -221,7 +220,7 @@ def update_plot(port):
             last_time = xdata[-1]
             if (not test_stopped) and (last_time >= max_time_seconds):
                 # Dispara stop
-                print(f"Tempo maximo de {max_time_minutes} min atingido.")
+                print(f"Tempo máximo de {max_time_minutes} min atingido.")
                 stop_test(port)  # Isso fecha CSV e manda 's'
         
         # Redesenha
@@ -244,8 +243,8 @@ def write_serial(port):
         if not cmd:
             continue
         
-        # Se for 'a' ou 'd', iniciamos um novo teste
-        if cmd == 'a' or cmd == 'd' or cmd == 'f':
+        # Se for 'a', 'd', 'f' etc., iniciamos um novo teste
+        if cmd in ['a', 'd', 'f']:
             start_test(port, cmd)  # Cria novo CSV e envia comando
         elif cmd == 's':
             # Para o teste
@@ -256,12 +255,27 @@ def write_serial(port):
         time.sleep(0.1)
 
 if __name__ == "__main__":
+    # --------------------------------------------------
+    # 1) Identifica porta serial passada como argumento: ex.: --COM7 ou --/dev/ttyUSB0
+    # --------------------------------------------------
+    port_arg = None
+    
+    for arg in sys.argv[1:]:
+        if arg.startswith("--"):
+            port_arg = arg[2:]  # Remove o '--', ex.: '--COM7' => 'COM7'
+    
+    # Caso não tenha sido passada, define um valor padrão
+    if not port_arg:
+        port_arg = "COM9"  # Porta padrão caso não seja especificada
+    
+    print(f"Tentando conectar em {port_arg} com baudrate {BAUDRATE}...")
+    
     try:
-        ser = serial.Serial(PORTA_SERIAL, BAUDRATE, timeout=1)
-        print(f"Conectado à placa na porta {PORTA_SERIAL}.")
+        ser = serial.Serial(port_arg, BAUDRATE, timeout=1)
+        print(f"Conectado à placa na porta {port_arg}.")
     except Exception as e:
-        print(f"Erro ao conectar na porta {PORTA_SERIAL}:", e)
-        exit(1)
+        print(f"Erro ao conectar na porta {port_arg}:", e)
+        sys.exit(1)
     
     # Thread para leitura da serial (grava em CSV se recording=True)
     reader_thread = threading.Thread(target=read_serial, args=(ser,), daemon=True)
