@@ -4,84 +4,77 @@ import subprocess
 import os
 import sys
 
-# Se quiser listar portas seriais no Windows, Linux e macOS:
 import serial
 import serial.tools.list_ports
 
-# Pillow >= 10.0 substituiu Image.ANTIALIAS por Resampling.LANCZOS
 from PIL import Image, ImageTk, ImageOps
 
 PROGRAMS_FOLDER = os.path.join("Assets")
 
-# Caminhos dos scripts Python
+# Scripts Python
 MOLA_SCRIPT = os.path.join(PROGRAMS_FOLDER, "vizual_mola.py")
 PESO_SCRIPT = os.path.join(PROGRAMS_FOLDER, "vizual_peso.py")
-CONTROLE_SCRIPT = os.path.join(PROGRAMS_FOLDER, "controle.py")
 AVIAO_SCRIPT = os.path.join(PROGRAMS_FOLDER, "vizual_aviao.py")
+CONTROLE_SCRIPT = os.path.join(PROGRAMS_FOLDER, "controle.py")
 
 LOGO_PATH = os.path.join("Assets", "Xmobots_logo.png")
 CAT_PATH = os.path.join("Assets", "gato.png")
 
-PORT = "COM7"
-
 INSTRUCTIONS = (
     "Selecione um dos programas abaixo para executar:\n\n"
-    "1. Simulador Servo/Mola: Simulação de bancada do servo com mola.\n"
-    "2. Simulador Servo/Peso: Simulação de bancada do servo puxando peso.\n"
-    "3. Simulador Elevon: Mecanismo de Aileron/Profundor em 3D.\n"
-    "4. Controle: Gerenciamento das bancadas via comunicação serial.\n"
-    "\n"
-    "Abaixo, você verá as mensagens de DEBUG (stdout e stderr) do script escolhido."
+    "1. Simulador Servo/Mola\n"
+    "2. Simulador Servo/Peso\n"
+    "3. Simulador Elevon (3D)\n"
+    "4. Controle de Servos: Gerenciamento via comunicação serial\n\n"
+    "Abaixo, você verá as mensagens de DEBUG de cada script.\n"
+    "Quando o script controle.py estiver ativo, você pode enviar comandos."
 )
 
-# Variáveis globais para controle do processo e do job "after" (leitura assíncrona)
 current_process = None
 current_after_job = None
 
+# Aqui armazenaremos a porta selecionada no dropdown
+selected_com_port = None
+
 def get_serial_ports():
     """
-    Retorna uma lista das portas seriais encontradas no sistema (Windows, Linux, macOS).
-    É necessário ter pyserial instalado (pip install pyserial).
+    Retorna a lista de portas seriais encontradas no sistema.
+    Necessário 'pyserial' instalado (pip install pyserial).
     """
     ports = serial.tools.list_ports.comports()
     return [p.device for p in ports]
 
 def kill_current_process():
-    """
-    Se houver um processo em execução ainda, tenta encerrá-lo.
-    """
     global current_process
     if current_process and current_process.poll() is None:
-        # Tenta matar o processo (em geral, não é 100% garantido no Windows sem outras flags)
         current_process.terminate()
     current_process = None
 
 def run_program(program_path, debug_text, extra_arg=None):
     """
-    Executa o script em 'program_path' e exibe as mensagens de stdout/stderr
-    diretamente no Text 'debug_text'.
-    Se 'extra_arg' for fornecido, passa como argumento ao script: ["python", program, "--COM5"], etc.
+    Executa o script em 'program_path' e redireciona stdout/stderr
+    para o Text 'debug_text'. Se 'extra_arg' for fornecido,
+    adiciona como argumento, ex.: ["python", program_path, "--COM7"].
     """
     global current_process, current_after_job
 
-    # Se já há um processo em execução, encerra.
+    # Se já há processo rodando, mata
     kill_current_process()
 
-    # Limpa a área de debug antes de iniciar o novo script
+    # Limpa Text
     debug_text.delete("1.0", "end")
 
-    # Monta o comando para subprocess
     cmd = ["python", program_path]
     if extra_arg:
-        cmd.append(f"--{extra_arg}")  # Exemplo: --COM7
+        cmd.append(f"--{extra_arg}")
 
     try:
-        # Cria o processo, redirecionando stdout e stderr para o mesmo "pipe"
         current_process = subprocess.Popen(
             cmd,
+            stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            text=True,    # para receber strings
+            text=True,
             shell=False
         )
     except Exception as e:
@@ -89,46 +82,70 @@ def run_program(program_path, debug_text, extra_arg=None):
         return
 
     def read_output():
-        """
-        Lê as linhas do subprocess e insere no debug_text.
-        Usa after() para não travar a GUI.
-        """
         global current_after_job
 
         if current_process:
-            # .poll() == None se ainda está rodando
             if current_process.poll() is None:
-                # Tenta ler 1024 caracteres (ou seja, um buffer) sem bloquear
                 output = current_process.stdout.read(1024)
                 if output:
                     debug_text.insert("end", output)
-                    debug_text.see("end")  # rola para o final
-                # Agenda próxima leitura
+                    debug_text.see("end")
                 current_after_job = debug_text.after(100, read_output)
             else:
-                # Se o processo terminou, lê o resto que sobrou no buffer
+                # Finalizado
                 remaining = current_process.stdout.read()
                 if remaining:
                     debug_text.insert("end", remaining)
                     debug_text.see("end")
                 debug_text.insert("end", "\n[Processo finalizado]\n")
                 debug_text.see("end")
-                current_process.stdout.close()
+                if current_process.stdout:
+                    current_process.stdout.close()
 
-    # Dispara a primeira leitura
     read_output()
 
-
-def on_port_selected(selected_port, debug_text):
+def on_port_selected(port):
     """
-    Callback para quando o usuário escolhe uma porta no dropdown.
-    Executa o programa de controle com o argumento '--COMXYZ' ou '/dev/ttyS0', etc.
+    Guarda a porta selecionada em 'selected_com_port' sem executar nada ainda.
     """
-    # Se o usuário selecionou algo diferente de "Selecione..."
-    if selected_port and "Selecione" not in selected_port:
-        #run_program(CONTROLE_SCRIPT, debug_text, extra_arg=selected_port)
-        PORT = selected_port
+    global selected_com_port
+    selected_com_port = port  # ex.: COM7 ou /dev/ttyUSB0
+    print("Porta selecionada:", selected_com_port)
 
+def on_controle_button(debug_text):
+    """
+    Chamado quando o usuário clica no botão "Controle de Servo".
+    Se 'selected_com_port' for válida, roda controle.py com esse argumento.
+    """
+    global selected_com_port
+    if not selected_com_port or "Selecione" in selected_com_port or "Nenhuma" in selected_com_port:
+        messagebox.showwarning("Aviso", "Selecione uma porta COM válida antes de iniciar o controle.")
+        return
+
+    # Inicia controle.py com '--COMxx'
+    run_program(CONTROLE_SCRIPT, debug_text, extra_arg=selected_com_port)
+
+def send_command_to_process(entry_widget, debug_text):
+    """
+    Envia o texto digitado ao stdin do processo atual (ex: controle.py).
+    """
+    global current_process
+    if not current_process or current_process.poll() is not None:
+        messagebox.showinfo("Info", "Nenhum processo está em execução para receber comandos.")
+        return
+
+    cmd = entry_widget.get().strip()
+    if cmd:
+        try:
+            current_process.stdin.write(cmd + "\n")
+            current_process.stdin.flush()
+            debug_text.insert("end", f"> {cmd}\n")
+            debug_text.see("end")
+        except Exception as e:
+            debug_text.insert("end", f"[Erro ao enviar comando: {e}]\n")
+            debug_text.see("end")
+
+    entry_widget.delete(0, "end")
 
 def main():
     root = tk.Tk()
@@ -148,18 +165,14 @@ def main():
     )
     title_label.pack(side="left", padx=20, pady=20)
 
-    # Tenta carregar a logo
     try:
         logo_img_raw = Image.open(LOGO_PATH)
-        # Se quiser redimensionar a logo:
-        # from PIL import Resampling
-        # logo_img_raw = logo_img_raw.resize((200, 50), Resampling.LANCZOS)
         logo_img = ImageTk.PhotoImage(logo_img_raw)
         logo_label = tk.Label(top_frame, image=logo_img, bg="#212121")
         logo_label.image = logo_img
         logo_label.pack(side="right", padx=20)
-    except Exception as e:
-        print(f"Não foi possível carregar a imagem de logo: {e}")
+    except:
+        pass
 
     main_frame = tk.Frame(root, bg="#212121")
     main_frame.pack(fill="both", expand=True, padx=10, pady=10)
@@ -167,7 +180,6 @@ def main():
     left_frame = tk.Frame(main_frame, bg="#212121")
     left_frame.pack(side="left", fill="both", expand=True)
 
-    # Botões de execução (sem o controle, que agora terá o dropdown)
     btn_style = {
         "width": 25,
         "height": 2,
@@ -177,7 +189,6 @@ def main():
         "relief": "raised"
     }
 
-    # ---- Botão: Simulador Mola ----
     tk.Button(
         left_frame,
         text="Simulador Servo/Mola",
@@ -185,7 +196,6 @@ def main():
         **btn_style
     ).pack(pady=10)
 
-    # ---- Botão: Simulador Peso ----
     tk.Button(
         left_frame,
         text="Simulador Servo/Peso",
@@ -193,7 +203,6 @@ def main():
         **btn_style
     ).pack(pady=10)
 
-    # ---- Botão: Simulador Elevon ----
     tk.Button(
         left_frame,
         text="Simulador Elevon",
@@ -201,38 +210,35 @@ def main():
         **btn_style
     ).pack(pady=10)
 
-    # ---- Botão: Controle ----
-    tk.Button(
-        left_frame,
-        text="Controle de servo",
-        command=lambda: run_program(CONTROLE_SCRIPT, debug_text, extra_arg=PORT),
-        **btn_style
-    ).pack(pady=5)
+    # Dropdown de portas
+    dropdown_frame = tk.Frame(left_frame, bg="#212121")
+    dropdown_frame.pack(pady=(15, 5))
 
-    # =========================================================
-    # Dropdown + Botão "Controle" lado a lado
-    # =========================================================
-    control_frame = tk.Frame(left_frame, bg="#212121")
-    control_frame.pack(pady=5)
+    tk.Label(dropdown_frame, text="Portas:", bg="#212121", fg="white").pack(side="left", padx=5)
 
-    # Listar portas seriais disponíveis
     ports = get_serial_ports()
     if not ports:
         ports = ["Nenhuma Porta Encontrada"]
 
-    # Valor inicial do dropdown
-    selected_port_var = tk.StringVar(control_frame)
+    selected_port_var = tk.StringVar(dropdown_frame)
     selected_port_var.set("Selecione a Porta")
 
-    # Cria OptionMenu
     port_menu = tk.OptionMenu(
-        control_frame,
+        dropdown_frame,
         selected_port_var,
         *ports,
-        command=lambda val: on_port_selected(val, debug_text)  # callback
+        command=on_port_selected  # Aqui só guardamos a porta selecionada
     )
     port_menu.config(width=15, bg="#403c3c", fg="white", font=("Helvetica", 10))
     port_menu.pack(side="left", padx=5)
+
+    # Botão para iniciar controle de servo (usando a porta escolhida)
+    tk.Button(
+        left_frame,
+        text="Controle de Servo",
+        command=lambda: on_controle_button(debug_text),
+        **btn_style
+    ).pack(pady=10)
 
     # Botão de sair
     tk.Button(
@@ -247,7 +253,7 @@ def main():
         height=2
     ).pack(side="bottom", pady=(40, 10))
 
-    # Frame à direita: Instruções + Área de Debug
+    # Frame à direita: Instruções + debug + envio de comandos
     right_frame = tk.Frame(main_frame, bg="#2f2f2f")
     right_frame.pack(side="right", fill="both", expand=True)
 
@@ -262,16 +268,30 @@ def main():
     )
     instructions_label.pack(padx=20, pady=(20, 5), anchor="n")
 
-    # ---- Área de debug (Text) logo abaixo das instruções ----
     debug_text = tk.Text(right_frame, height=10, bg="#1e1e1e", fg="white")
     debug_text.pack(padx=10, pady=(0, 10), fill="both", expand=True)
 
-    # -- Scrollbar (opcional) --
     scrollbar = tk.Scrollbar(debug_text, command=debug_text.yview)
     debug_text.configure(yscrollcommand=scrollbar.set)
     scrollbar.pack(side="right", fill="y")
 
-    # Carrega a imagem do gato (pequena) no canto inferior direito
+    command_frame = tk.Frame(right_frame, bg="#2f2f2f")
+    command_frame.pack(fill="x", pady=(0, 10))
+
+    tk.Label(command_frame, text="Comando:", bg="#2f2f2f", fg="white").pack(side="left", padx=5)
+    entry_cmd = tk.Entry(command_frame, width=30)
+    entry_cmd.pack(side="left", padx=5)
+
+    tk.Button(
+        command_frame,
+        text="Enviar",
+        command=lambda: send_command_to_process(entry_cmd, debug_text),
+        bg="#403c3c",
+        fg="white",
+        font=("Helvetica", 10, "bold")
+    ).pack(side="left", padx=5)
+
+    # Gato no canto
     try:
         cat_img_raw = Image.open(CAT_PATH)
         cat_img_raw = cat_img_raw.resize((50, 50), Image.LANCZOS)
@@ -279,8 +299,8 @@ def main():
         cat_label = tk.Label(root, image=cat_img, bg="#212121")
         cat_label.image = cat_img
         cat_label.place(relx=1.0, rely=1.0, x=-5, y=-5, anchor="se")
-    except Exception as e:
-        print(f"Não foi possível carregar a imagem do gato: {e}")
+    except:
+        pass
 
     root.mainloop()
 
