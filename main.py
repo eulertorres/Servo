@@ -7,7 +7,8 @@ import threading  # importado para carregamento assíncrono
 from io import BytesIO
 
 import customtkinter as ctk
-from PIL import Image, ImageTk
+from PIL import Image
+from tkinter import messagebox  # <-- Usando messagebox do tkinter
 
 # Se quiser usar pyserial, lembre-se: pip install pyserial
 import serial
@@ -28,6 +29,7 @@ MOLA_SCRIPT = os.path.join(PROGRAMS_FOLDER, "vizual_mola.py")
 PESO_SCRIPT = os.path.join(PROGRAMS_FOLDER, "vizual_peso.py")
 AVIAO_SCRIPT = os.path.join(PROGRAMS_FOLDER, "vizual_aviao.py")
 CONTROLE_SCRIPT = os.path.join(PROGRAMS_FOLDER, "controle.py")
+CADASTRO_SCRIPT = os.path.join(PROGRAMS_FOLDER, "Add_servo.py")  # <-- script de cadastro
 
 LOGO_PATH = os.path.join("Assets", "Xmobots_logo.png")
 CAT_PATH = os.path.join("Assets", "gato.png")
@@ -52,21 +54,18 @@ if not os.path.exists(ICRAWLER_STORAGE):
 #                           FUNÇÃO DE BUSCA DE IMAGENS                        #
 ###############################################################################
 def fetch_image_for_model(model_name):
-    """Usa icrawler para baixar 1 imagem do servo e salvar em 'Database/Images'.
-       Se já existir, retorna o caminho existente e não baixa de novo."""
     safe_model_name = model_name.replace(" ", "_").replace("/", "_")
     local_filename = safe_model_name + ".jpg"
+    print("Procurando imagem servo: ", local_filename)
     local_path = os.path.join(ICRAWLER_STORAGE, local_filename)
 
-    # Se já existe, retorna imediatamente
     if os.path.exists(local_path):
         return local_path
 
-    # Faz a busca
     try:
         google_crawler = GoogleImageCrawler(
-            parser_threads=1,          # 1 thread para evitar conflitos
-            downloader_threads=1,      # 1 thread para evitar conflitos
+            parser_threads=1,
+            downloader_threads=1,
             storage={'root_dir': ICRAWLER_STORAGE}
         )
         google_crawler.crawl(keyword=f"{model_name} servo", max_num=1)
@@ -74,7 +73,6 @@ def fetch_image_for_model(model_name):
         print(f"[AVISO] Falha ao baixar imagem de '{model_name}': {e}")
         return None
 
-    # Após o crawl, icrawler deve ter criado "000001.jpg" dentro de ICRAWLER_STORAGE
     downloaded_file = os.path.join(ICRAWLER_STORAGE, "000001.jpg")
     if os.path.exists(downloaded_file):
         try:
@@ -144,7 +142,7 @@ def run_program(program_path, debug_text, extra_arg=None):
             shell=False
         )
     except Exception as e:
-        ctk.CTkMessagebox(title="Erro", message=f"Erro ao iniciar o programa:\n{e}")
+        messagebox.showerror("Erro", f"Erro ao iniciar o programa:\n{e}")
         return
 
     def read_output():
@@ -171,7 +169,7 @@ def run_program(program_path, debug_text, extra_arg=None):
 def send_command_to_process(entry_widget, debug_text):
     global current_process
     if not current_process or current_process.poll() is not None:
-        ctk.CTkMessagebox(title="Info", message="Nenhum processo está em execução para receber comandos.")
+        messagebox.showinfo("Info", "Nenhum processo está em execução para receber comandos.")
         return
 
     cmd = entry_widget.get().strip()
@@ -190,6 +188,9 @@ def send_command_to_process(entry_widget, debug_text):
 ###############################################################################
 #                        SERIAL / PORTAS                                      #
 ###############################################################################
+import serial
+import serial.tools.list_ports
+
 selected_com_port = None
 
 def get_serial_ports():
@@ -204,7 +205,7 @@ def on_port_selected(choice):
 def on_controle_button(debug_text):
     global selected_com_port
     if not selected_com_port or "Selecione" in selected_com_port or "Nenhuma" in selected_com_port:
-        ctk.CTkMessagebox(title="Aviso", message="Selecione uma porta COM válida antes de iniciar o controle.")
+        messagebox.showwarning("Aviso", "Selecione uma porta COM válida antes de iniciar o controle.")
         return
     run_program(CONTROLE_SCRIPT, debug_text, extra_arg=selected_com_port)
 
@@ -240,14 +241,14 @@ class ServoValidatorApp(ctk.CTk):
         )
         self.title_label.pack(side="left", padx=20, pady=20)
 
-        # Logo (opcional)
+        # Logo
         try:
             logo_img = Image.open(LOGO_PATH)
-            self.logo_imgtk = ImageTk.PhotoImage(logo_img)
-            self.logo_label = ctk.CTkLabel(self.top_frame, image=self.logo_imgtk, text="")
+            self.logo_img_ctk = ctk.CTkImage(light_image=logo_img, dark_image=logo_img, size=(200, 50))
+            self.logo_label = ctk.CTkLabel(self.top_frame, image=self.logo_img_ctk, text="")
             self.logo_label.pack(side="right", padx=20)
-        except:
-            pass
+        except Exception as e:
+            print(f"Erro ao carregar logo: {e}")
 
         # Main frame (split left/right)
         self.main_frame = ctk.CTkFrame(self)
@@ -275,6 +276,14 @@ class ServoValidatorApp(ctk.CTk):
         )
         self.btn_aviao.pack(pady=10)
 
+        # Botão de Cadastro de Servo
+        self.btn_cadastro = ctk.CTkButton(
+            self.left_frame,
+            text="Cadastrar Servo",
+            command=lambda: self.run_script(CADASTRO_SCRIPT)
+        )
+        self.btn_cadastro.pack(pady=10)
+
         # Dropdown de portas
         self.dropdown_frame = ctk.CTkFrame(self.left_frame)
         self.dropdown_frame.pack(pady=(15,5))
@@ -285,10 +294,12 @@ class ServoValidatorApp(ctk.CTk):
             ports = ["Nenhuma Porta Encontrada"]
 
         self.port_var = ctk.StringVar(value="Selecione a Porta")
-        self.combo_port = ctk.CTkOptionMenu(self.dropdown_frame,
-                                             values=ports,
-                                             command=on_port_selected,
-                                             variable=self.port_var)
+        self.combo_port = ctk.CTkOptionMenu(
+            self.dropdown_frame,
+            values=ports,
+            command=on_port_selected,
+            variable=self.port_var
+        )
         self.combo_port.pack(side="left", padx=5)
 
         self.btn_controle = ctk.CTkButton(
@@ -345,14 +356,14 @@ class ServoValidatorApp(ctk.CTk):
         self.db_frame = ctk.CTkFrame(self.right_frame)
         self.create_db_area()
 
-        # Gato no canto (opcional)
+        # Gato no canto
         try:
             cat_img_raw = Image.open(CAT_PATH).resize((50, 50))
-            self.cat_img = ImageTk.PhotoImage(cat_img_raw)
-            self.cat_label = ctk.CTkLabel(self, image=self.cat_img, text="")
+            self.cat_img_ctk = ctk.CTkImage(light_image=cat_img_raw, dark_image=cat_img_raw, size=(50, 50))
+            self.cat_label = ctk.CTkLabel(self, image=self.cat_img_ctk, text="")
             self.cat_label.place(relx=1.0, rely=1.0, x=-5, y=-5, anchor="se")
-        except:
-            pass
+        except Exception as e:
+            print(f"Erro ao carregar gato.png: {e}")
 
     def on_sair(self):
         kill_current_process()
@@ -415,10 +426,7 @@ class ServoValidatorApp(ctk.CTk):
         self.results_frame = ctk.CTkFrame(self.db_frame)
         self.results_frame.pack(fill="both", expand=True, padx=10, pady=10)
 
-        #self.servos_flow_frame = ctk.CTkFrame(self.results_frame)
-        #self.servos_flow_frame.pack(fill="both", expand=True)
-        #self.servos_flow_frame.bind("<Configure>", self.on_servos_flow_configure)
-
+        # Frame rolável para exibir resultados
         self.servos_scrollable_frame = ctk.CTkScrollableFrame(self.results_frame)
         self.servos_scrollable_frame.pack(fill="both", expand=True, padx=10, pady=10)
 
@@ -426,9 +434,6 @@ class ServoValidatorApp(ctk.CTk):
 
     def on_filters_flow_configure(self, event):
         flow_layout(self.filters_flow_frame, self.filter_blocks, padding_x=10, padding_y=5)
-
-    def on_servos_flow_configure(self, event):
-        flow_layout(self.servos_flow_frame, self.servo_blocks, padding_x=15, padding_y=15, margin_left=15)
 
     def aplicar_filtros(self):
         for sb in self.servo_blocks:
@@ -454,7 +459,7 @@ class ServoValidatorApp(ctk.CTk):
 
         csv_path = os.path.join("Database", "servos.csv")
         if not os.path.exists(csv_path):
-            ctk.CTkMessagebox(title="Erro", message="Arquivo de database não encontrado.")
+            messagebox.showerror("Erro", "Arquivo de database não encontrado.")
             return
 
         matched_results = []
@@ -466,8 +471,6 @@ class ServoValidatorApp(ctk.CTk):
                 reader = csv.DictReader(f, delimiter=",")
 
                 for row in reader:
-                    make = row.get("Make", "")
-                    model = row.get("Model", "")
                     weight = safe_float(row.get("Weight (g)"))
                     L = safe_float(row.get("L (mm)"))
                     C = safe_float(row.get("C (mm)"))
@@ -511,50 +514,43 @@ class ServoValidatorApp(ctk.CTk):
 
                     matched_results.append(row)
         except Exception as e:
-            ctk.CTkMessagebox(title="Erro CSV", message=f"Falha ao ler CSV: {e}")
+            messagebox.showerror("Erro CSV", f"Falha ao ler CSV: {e}")
             return
 
         if not matched_results:
-            msg = ctk.CTkLabel(self.servos_flow_frame, text="Nenhum resultado encontrado.", font=("Helvetica", 14))
+            msg = ctk.CTkLabel(self.servos_scrollable_frame, text="Nenhum resultado encontrado.", font=("Helvetica", 14))
+            msg.pack(padx=10, pady=10)
             self.servo_blocks.append(msg)
-            msg.place(x=10, y=10)
             return
 
-        # Distribuição em 5 colunas usando grid
         for idx, row in enumerate(matched_results):
             block = self.create_servo_block(row, parent=self.servos_scrollable_frame)
-            # Calcula a linha e coluna (5 colunas)
             row_idx = idx // 7
             col_idx = idx % 7
             block.grid(row=row_idx, column=col_idx, padx=10, pady=10, sticky="n")
             self.servo_blocks.append(block)
 
     def create_servo_block(self, row, parent):
-        make = row.get("Make", "")
-        model = row.get("Model", "")
-        
         block_frame = ctk.CTkFrame(parent, corner_radius=8, fg_color="#333333")
         block_frame.configure(width=200, height=300)
 
-        # Título do bloco
+        make = row.get("Make", "")
+        model = row.get("Model", "")
         title_str = f"{make} {model}"
-        lbl_title = ctk.CTkLabel(block_frame, text=title_str, font=("Helvetica", 12, "bold"))
+        lbl_title = ctk.CTkLabel(block_frame, text=title_str, font=("Helvetica", 20, "bold"))
         lbl_title.pack(padx=5, pady=5)
 
-        # Label para imagem (placeholder)
         lbl_img = ctk.CTkLabel(block_frame, text="(Carregando imagem...)")
         lbl_img.pack(padx=5, pady=5)
-        
+
         # Carrega a imagem de forma assíncrona
         def load_image_async():
-            print("Buscando imagem para:", model)
             image_path = fetch_image_for_model(model)
             if image_path and os.path.exists(image_path):
                 try:
                     img_raw = Image.open(image_path)
                     img_raw.thumbnail((80, 80))
-                    servo_imgtk = ImageTk.PhotoImage(img_raw)
-                    # Atualiza o label na thread principal
+                    servo_imgtk = ctk.CTkImage(light_image=img_raw, dark_image=img_raw, size=(80, 80))
                     def update_label():
                         lbl_img.configure(image=servo_imgtk, text="")
                         lbl_img.image = servo_imgtk
@@ -570,7 +566,6 @@ class ServoValidatorApp(ctk.CTk):
 
         threading.Thread(target=load_image_async, daemon=True).start()
 
-        # Montando a descrição
         desc_lines = []
         if row.get("Make"):
             desc_lines.append(f"Fabricante: {row.get('Make')}")
@@ -582,13 +577,13 @@ class ServoValidatorApp(ctk.CTk):
             desc_lines.append(f"Preço: {row.get('Typical Price')}")
         if row.get("Weight (g)"):
             desc_lines.append(f"Peso (g): {row.get('Weight (g)')}")
-        if row.get("L (mm)") or row.get("C (mm)") or row.get("A (mm)"):
-            l = row.get("L (mm)") or ""
-            c = row.get("C (mm)") or ""
-            a = row.get("A (mm)") or ""
-            desc_lines.append(f"LxCxA (mm): {l}x{c}x{a}")
 
-        # Torque
+        L = row.get("L (mm)") or ""
+        C = row.get("C (mm)") or ""
+        A = row.get("A (mm)") or ""
+        if L or C or A:
+            desc_lines.append(f"LxCxA (mm): {L}x{C}x{A}")
+
         torque_lines = []
         for i in range(1, 6):
             tensao_key = f"TensãoTorque{i}"
@@ -596,14 +591,11 @@ class ServoValidatorApp(ctk.CTk):
             tensao = row.get(tensao_key)
             torque = row.get(torque_key)
             if tensao or torque:
-                tensao_str = tensao if tensao else ""
-                torque_str = torque if torque else ""
-                torque_lines.append(f"{tensao_str} {torque_str}".strip())
+                torque_lines.append(f"{tensao or ''} {torque or ''}".strip())
         if torque_lines:
-            desc_lines.append("Torque (kgf.cm):")
+            desc_lines.append("Tensão (V) | Torque (kgf.cm):")
             desc_lines.extend(torque_lines)
 
-        # Velocidade
         speed_lines = []
         for i in range(1, 6):
             tensao_key = f"TensãoSpeed{i}"
@@ -611,14 +603,11 @@ class ServoValidatorApp(ctk.CTk):
             tensao_speed = row.get(tensao_key)
             speed_val = row.get(speed_key)
             if tensao_speed or speed_val:
-                tensao_speed_str = tensao_speed if tensao_speed else ""
-                speed_str = speed_val if speed_val else ""
-                speed_lines.append(f"{tensao_speed_str} {speed_str}".strip())
+                speed_lines.append(f"{tensao_speed or ''} {speed_val or ''}".strip())
         if speed_lines:
-            desc_lines.append("Velocidade (°/s):")
+            desc_lines.append("Tensão (V) | Velocidade (°/s):")
             desc_lines.extend(speed_lines)
 
-        # Outras informações
         if row.get("Tipo motor"):
             desc_lines.append(f"Tipo motor: {row.get('Tipo motor')}")
         if row.get("Rotação"):
@@ -627,8 +616,26 @@ class ServoValidatorApp(ctk.CTk):
             desc_lines.append(f"Material eng.: {row.get('Material eng.')}")
 
         desc_text = "\n".join(desc_lines)
-        lbl_desc = ctk.CTkLabel(block_frame, text=desc_text, font=("Helvetica", 10), justify="left")
+        lbl_desc = ctk.CTkLabel(block_frame, text=desc_text, font=("Helvetica", 15), justify="left")
         lbl_desc.pack(padx=5, pady=5)
+
+        def open_datasheet():
+            datasheet_path = os.path.join("Database", "Datasheets", f"{model}.pdf")
+            if os.path.exists(datasheet_path):
+                try:
+                    if sys.platform.startswith('win'):
+                        os.startfile(datasheet_path)
+                    elif sys.platform.startswith('darwin'):
+                        subprocess.call(['open', datasheet_path])
+                    else:
+                        subprocess.call(['xdg-open', datasheet_path])
+                except Exception as e:
+                    messagebox.showerror("Erro", f"Falha ao abrir PDF:\n{e}")
+            else:
+                messagebox.showwarning("Aviso", "Num tem pra esse :(")
+
+        btn_pdf = ctk.CTkButton(block_frame, text="Datasheet", command=open_datasheet)
+        btn_pdf.pack(pady=(0, 5))
 
         return block_frame
 
