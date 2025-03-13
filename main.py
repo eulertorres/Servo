@@ -1,18 +1,29 @@
-import tkinter as tk
-from tkinter import messagebox
-import subprocess
 import os
-import sys
 import csv
+import sys
+import subprocess
+import requests
+import threading  # importado para carregamento assíncrono
+from io import BytesIO
 
+import customtkinter as ctk
+from PIL import Image, ImageTk
+
+# Se quiser usar pyserial, lembre-se: pip install pyserial
 import serial
 import serial.tools.list_ports
 
-from PIL import Image, ImageTk, ImageOps
+# Se quiser usar icrawler, lembre-se: pip install icrawler
+from icrawler.builtin import GoogleImageCrawler
 
-PROGRAMS_FOLDER = os.path.join("Assets")
+###############################################################################
+#                                  CONFIG                                     #
+###############################################################################
+ctk.set_appearance_mode("dark")  # "light" ou "system"
+ctk.set_default_color_theme("dark-blue")  # tema default ou custom
 
-# Scripts Python
+PROGRAMS_FOLDER = "Assets"
+
 MOLA_SCRIPT = os.path.join(PROGRAMS_FOLDER, "vizual_mola.py")
 PESO_SCRIPT = os.path.join(PROGRAMS_FOLDER, "vizual_peso.py")
 AVIAO_SCRIPT = os.path.join(PROGRAMS_FOLDER, "vizual_aviao.py")
@@ -32,19 +43,81 @@ INSTRUCTIONS = (
     "Quando o script controle.py estiver ativo, você pode enviar comandos."
 )
 
+# Pasta onde salvaremos as imagens baixadas
+ICRAWLER_STORAGE = os.path.join("Database", "Images")
+if not os.path.exists(ICRAWLER_STORAGE):
+    os.makedirs(ICRAWLER_STORAGE)
+
+###############################################################################
+#                           FUNÇÃO DE BUSCA DE IMAGENS                        #
+###############################################################################
+def fetch_image_for_model(model_name):
+    """Usa icrawler para baixar 1 imagem do servo e salvar em 'Database/Images'.
+       Se já existir, retorna o caminho existente e não baixa de novo."""
+    safe_model_name = model_name.replace(" ", "_").replace("/", "_")
+    local_filename = safe_model_name + ".jpg"
+    local_path = os.path.join(ICRAWLER_STORAGE, local_filename)
+
+    # Se já existe, retorna imediatamente
+    if os.path.exists(local_path):
+        return local_path
+
+    # Faz a busca
+    try:
+        google_crawler = GoogleImageCrawler(
+            parser_threads=1,          # 1 thread para evitar conflitos
+            downloader_threads=1,      # 1 thread para evitar conflitos
+            storage={'root_dir': ICRAWLER_STORAGE}
+        )
+        google_crawler.crawl(keyword=f"{model_name} servo", max_num=1)
+    except Exception as e:
+        print(f"[AVISO] Falha ao baixar imagem de '{model_name}': {e}")
+        return None
+
+    # Após o crawl, icrawler deve ter criado "000001.jpg" dentro de ICRAWLER_STORAGE
+    downloaded_file = os.path.join(ICRAWLER_STORAGE, "000001.jpg")
+    if os.path.exists(downloaded_file):
+        try:
+            os.rename(downloaded_file, local_path)
+            return local_path
+        except Exception as e:
+            print(f"Erro ao renomear 000001.jpg para {local_filename}: {e}")
+            return None
+
+    return None
+
+###############################################################################
+#                           FUNÇÕES DE LAYOUT (FLOW)                          #
+###############################################################################
+def flow_layout(parent, blocks, padding_x=10, padding_y=10, margin_left=10):
+    parent_width = parent.winfo_width()
+    if parent_width <= 0:
+        return
+
+    x_cursor = margin_left
+    y_cursor = padding_y
+    line_height = 0
+
+    for block in blocks:
+        block.update_idletasks()
+        bw = block.winfo_reqwidth()
+        bh = block.winfo_reqheight()
+
+        if x_cursor + bw + padding_x > parent_width:
+            x_cursor = margin_left
+            y_cursor += line_height + padding_y
+            line_height = 0
+
+        block.place(x=x_cursor, y=y_cursor)
+        x_cursor += bw + padding_x
+        if bh > line_height:
+            line_height = bh
+
+###############################################################################
+#                           CÓDIGO PARA PROCESSOS                             #
+###############################################################################
 current_process = None
 current_after_job = None
-
-# Porta COM selecionada
-selected_com_port = None
-
-def get_serial_ports():
-    """
-    Retorna a lista de portas seriais encontradas no sistema.
-    Necessário 'pyserial' instalado (pip install pyserial).
-    """
-    ports = serial.tools.list_ports.comports()
-    return [p.device for p in ports]
 
 def kill_current_process():
     global current_process
@@ -53,17 +126,8 @@ def kill_current_process():
     current_process = None
 
 def run_program(program_path, debug_text, extra_arg=None):
-    """
-    Executa o script em 'program_path' e redireciona stdout/stderr
-    para o Text 'debug_text'. Se 'extra_arg' for fornecido,
-    adiciona como argumento, ex.: ["python", program_path, "--COM7"].
-    """
     global current_process, current_after_job
-
-    # Se já há processo rodando, mata
     kill_current_process()
-
-    # Limpa Text
     debug_text.delete("1.0", "end")
 
     cmd = ["python", program_path]
@@ -80,12 +144,11 @@ def run_program(program_path, debug_text, extra_arg=None):
             shell=False
         )
     except Exception as e:
-        messagebox.showerror("Erro", f"Erro ao iniciar o programa:\n{e}")
+        ctk.CTkMessagebox(title="Erro", message=f"Erro ao iniciar o programa:\n{e}")
         return
 
     def read_output():
         global current_after_job
-
         if current_process:
             if current_process.poll() is None:
                 output = current_process.stdout.read(1024)
@@ -94,7 +157,6 @@ def run_program(program_path, debug_text, extra_arg=None):
                     debug_text.see("end")
                 current_after_job = debug_text.after(100, read_output)
             else:
-                # Finalizado
                 remaining = current_process.stdout.read()
                 if remaining:
                     debug_text.insert("end", remaining)
@@ -106,33 +168,10 @@ def run_program(program_path, debug_text, extra_arg=None):
 
     read_output()
 
-def on_port_selected(port):
-    """
-    Guarda a porta selecionada em 'selected_com_port' sem executar nada ainda.
-    """
-    global selected_com_port
-    selected_com_port = port
-    print("Porta selecionada:", selected_com_port)
-
-def on_controle_button(debug_text):
-    """
-    Chamado quando o usuário clica no botão "Controle de Servo".
-    Se 'selected_com_port' for válida, roda controle.py com esse argumento.
-    """
-    global selected_com_port
-    if not selected_com_port or "Selecione" in selected_com_port or "Nenhuma" in selected_com_port:
-        messagebox.showwarning("Aviso", "Selecione uma porta COM válida antes de iniciar o controle.")
-        return
-
-    run_program(CONTROLE_SCRIPT, debug_text, extra_arg=selected_com_port)
-
 def send_command_to_process(entry_widget, debug_text):
-    """
-    Envia o texto digitado ao stdin do processo atual (ex: controle.py).
-    """
     global current_process
     if not current_process or current_process.poll() is not None:
-        messagebox.showinfo("Info", "Nenhum processo está em execução para receber comandos.")
+        ctk.CTkMessagebox(title="Info", message="Nenhum processo está em execução para receber comandos.")
         return
 
     cmd = entry_widget.get().strip()
@@ -148,13 +187,31 @@ def send_command_to_process(entry_widget, debug_text):
 
     entry_widget.delete(0, "end")
 
+###############################################################################
+#                        SERIAL / PORTAS                                      #
+###############################################################################
+selected_com_port = None
 
-# ---------------------------
-# Consulta Database
-# ---------------------------
+def get_serial_ports():
+    ports = serial.tools.list_ports.comports()
+    return [p.device for p in ports]
 
+def on_port_selected(choice):
+    global selected_com_port
+    selected_com_port = choice
+    print("Porta selecionada:", selected_com_port)
+
+def on_controle_button(debug_text):
+    global selected_com_port
+    if not selected_com_port or "Selecione" in selected_com_port or "Nenhuma" in selected_com_port:
+        ctk.CTkMessagebox(title="Aviso", message="Selecione uma porta COM válida antes de iniciar o controle.")
+        return
+    run_program(CONTROLE_SCRIPT, debug_text, extra_arg=selected_com_port)
+
+###############################################################################
+#                      FUNÇÕES AUXILIARES CSV / FILTROS                       #
+###############################################################################
 def safe_float(value):
-    """ Tenta converter 'value' para float. Se falhar, retorna None. """
     if value is None:
         return None
     try:
@@ -162,120 +219,253 @@ def safe_float(value):
     except:
         return None
 
-def create_db_frame(parent):
-    """
-    Cria o frame de consulta de database dentro de 'parent'.
-    Retorna o frame criado, contendo campos de filtros e um botão 'Aplicar'.
-    
-    Esse frame vai ocupar toda a área do 'parent' (fill='both', expand=True).
-    """
-    db_frame = tk.Frame(parent, bg="#3d3d3d")
-    db_frame.pack(fill="both", expand=True)
+###############################################################################
+#                             JANELA PRINCIPAL                                #
+###############################################################################
+class ServoValidatorApp(ctk.CTk):
+    def __init__(self):
+        super().__init__()
 
-    # Configura grid para expandir (linhas e colunas)
-    db_frame.grid_rowconfigure(9, weight=1)
-    # Se quisermos que a coluna de resultados também se expanda, podemos:
-    db_frame.grid_columnconfigure(1, weight=1)
+        self.title("Super Validador de Servos")
+        self.geometry("1600x920")
 
-    lbl_title = tk.Label(
-        db_frame, text="Consulta Database de Servos",
-        bg="#3d3d3d", fg="white", font=("Helvetica", 14, "bold")
-    )
-    lbl_title.grid(row=0, column=0, columnspan=3, pady=(5, 10), sticky="n")
+        # Frame top
+        self.top_frame = ctk.CTkFrame(self)
+        self.top_frame.pack(side="top", fill="x", padx=5, pady=5)
 
-    tk.Label(db_frame, text="Torque mínimo (kgf.cm):", bg="#3d3d3d", fg="white").grid(row=1, column=0, sticky="e")
-    torque_min_entry = tk.Entry(db_frame, width=10)
-    torque_min_entry.grid(row=1, column=1, padx=5, pady=2, sticky="w")
+        self.title_label = ctk.CTkLabel(
+            self.top_frame,
+            text="SUPER VALIDADOR DE SERVOS",
+            font=("Helvetica", 32, "bold")
+        )
+        self.title_label.pack(side="left", padx=20, pady=20)
 
-    tk.Label(db_frame, text="Peso máximo (g):", bg="#3d3d3d", fg="white").grid(row=2, column=0, sticky="e")
-    weight_max_entry = tk.Entry(db_frame, width=10)
-    weight_max_entry.grid(row=2, column=1, padx=5, pady=2, sticky="w")
-
-    tk.Label(db_frame, text="Comprimento máx (mm):", bg="#3d3d3d", fg="white").grid(row=3, column=0, sticky="e")
-    length_max_entry = tk.Entry(db_frame, width=10)
-    length_max_entry.grid(row=3, column=1, padx=5, pady=2, sticky="w")
-
-    tk.Label(db_frame, text="Largura máx (mm):", bg="#3d3d3d", fg="white").grid(row=4, column=0, sticky="e")
-    width_max_entry = tk.Entry(db_frame, width=10)
-    width_max_entry.grid(row=4, column=1, padx=5, pady=2, sticky="w")
-
-    tk.Label(db_frame, text="Altura máx (mm):", bg="#3d3d3d", fg="white").grid(row=5, column=0, sticky="e")
-    height_max_entry = tk.Entry(db_frame, width=10)
-    height_max_entry.grid(row=5, column=1, padx=5, pady=2, sticky="w")
-
-    tk.Label(db_frame, text="Vel. angular mínima (°/s):", bg="#3d3d3d", fg="white").grid(row=6, column=0, sticky="e")
-    speed_min_entry = tk.Entry(db_frame, width=10)
-    speed_min_entry.grid(row=6, column=1, padx=5, pady=2, sticky="w")
-
-    tk.Label(db_frame, text="Preço máximo ($):", bg="#3d3d3d", fg="white").grid(row=7, column=0, sticky="e")
-    price_max_entry = tk.Entry(db_frame, width=10)
-    price_max_entry.grid(row=7, column=1, padx=5, pady=2, sticky="w")
-
-    # Botão Aplicar
-    def aplicar_filtros():
-        results_text.delete("1.0", "end")
-
-        # Lendo valores dos filtros (se vazio, None)
+        # Logo (opcional)
         try:
-            torque_min = float(torque_min_entry.get()) if torque_min_entry.get().strip() else None
-        except ValueError:
-            torque_min = None
+            logo_img = Image.open(LOGO_PATH)
+            self.logo_imgtk = ImageTk.PhotoImage(logo_img)
+            self.logo_label = ctk.CTkLabel(self.top_frame, image=self.logo_imgtk, text="")
+            self.logo_label.pack(side="right", padx=20)
+        except:
+            pass
 
-        try:
-            weight_max = float(weight_max_entry.get()) if weight_max_entry.get().strip() else None
-        except ValueError:
-            weight_max = None
+        # Main frame (split left/right)
+        self.main_frame = ctk.CTkFrame(self)
+        self.main_frame.pack(fill="both", expand=True, padx=10, pady=10)
 
-        try:
-            length_max = float(length_max_entry.get()) if length_max_entry.get().strip() else None
-        except ValueError:
-            length_max = None
+        # Left side: botões
+        self.left_frame = ctk.CTkFrame(self.main_frame)
+        self.left_frame.pack(side="left", fill="y", padx=5)
 
-        try:
-            width_max = float(width_max_entry.get()) if width_max_entry.get().strip() else None
-        except ValueError:
-            width_max = None
+        self.btn_mola = ctk.CTkButton(
+            self.left_frame, text="Simulador Servo/Mola",
+            command=lambda: self.run_script(MOLA_SCRIPT)
+        )
+        self.btn_mola.pack(pady=10)
 
-        try:
-            height_max = float(height_max_entry.get()) if height_max_entry.get().strip() else None
-        except ValueError:
-            height_max = None
+        self.btn_peso = ctk.CTkButton(
+            self.left_frame, text="Simulador Servo/Peso",
+            command=lambda: self.run_script(PESO_SCRIPT)
+        )
+        self.btn_peso.pack(pady=10)
 
-        try:
-            speed_min = float(speed_min_entry.get()) if speed_min_entry.get().strip() else None
-        except ValueError:
-            speed_min = None
+        self.btn_aviao = ctk.CTkButton(
+            self.left_frame, text="Simulador Elevon",
+            command=lambda: self.run_script(AVIAO_SCRIPT)
+        )
+        self.btn_aviao.pack(pady=10)
 
+        # Dropdown de portas
+        self.dropdown_frame = ctk.CTkFrame(self.left_frame)
+        self.dropdown_frame.pack(pady=(15,5))
+        ctk.CTkLabel(self.dropdown_frame, text="Portas:").pack(side="left", padx=5)
+
+        ports = get_serial_ports()
+        if not ports:
+            ports = ["Nenhuma Porta Encontrada"]
+
+        self.port_var = ctk.StringVar(value="Selecione a Porta")
+        self.combo_port = ctk.CTkOptionMenu(self.dropdown_frame,
+                                             values=ports,
+                                             command=on_port_selected,
+                                             variable=self.port_var)
+        self.combo_port.pack(side="left", padx=5)
+
+        self.btn_controle = ctk.CTkButton(
+            self.left_frame, text="Controle de Servo",
+            command=lambda: on_controle_button(self.debug_text)
+        )
+        self.btn_controle.pack(pady=10)
+
+        self.btn_db = ctk.CTkButton(
+            self.left_frame, text="Consulta Database",
+            command=self.toggle_db_view
+        )
+        self.btn_db.pack(pady=10)
+
+        self.btn_sair = ctk.CTkButton(
+            self.left_frame, text="Sair", fg_color="red",
+            command=self.on_sair
+        )
+        self.btn_sair.pack(side="bottom", pady=(40, 10))
+
+        # Right side: area switch
+        self.right_frame = ctk.CTkFrame(self.main_frame)
+        self.right_frame.pack(side="right", fill="both", expand=True)
+
+        # Debug Frame
+        self.debug_frame = ctk.CTkFrame(self.right_frame)
+        self.debug_frame.pack(fill="both", expand=True)
+
+        self.instructions_label = ctk.CTkLabel(
+            self.debug_frame,
+            text=INSTRUCTIONS,
+            height=100,
+            justify="left"
+        )
+        self.instructions_label.pack(padx=20, pady=10, fill="x")
+
+        self.debug_text = ctk.CTkTextbox(self.debug_frame, width=800, height=300)
+        self.debug_text.pack(padx=10, pady=5, fill="both", expand=True)
+
+        self.command_frame = ctk.CTkFrame(self.debug_frame)
+        self.command_frame.pack(fill="x", pady=(0, 10))
+
+        ctk.CTkLabel(self.command_frame, text="Comando:").pack(side="left", padx=5)
+        self.entry_cmd = ctk.CTkEntry(self.command_frame, width=180)
+        self.entry_cmd.pack(side="left", padx=5)
+
+        self.btn_enviar = ctk.CTkButton(
+            self.command_frame, text="Enviar",
+            command=lambda: send_command_to_process(self.entry_cmd, self.debug_text)
+        )
+        self.btn_enviar.pack(side="left", padx=5)
+
+        # DB Frame (filtros + resultados)
+        self.db_frame = ctk.CTkFrame(self.right_frame)
+        self.create_db_area()
+
+        # Gato no canto (opcional)
         try:
-            price_max = float(price_max_entry.get()) if price_max_entry.get().strip() else None
-        except ValueError:
-            price_max = None
+            cat_img_raw = Image.open(CAT_PATH).resize((50, 50))
+            self.cat_img = ImageTk.PhotoImage(cat_img_raw)
+            self.cat_label = ctk.CTkLabel(self, image=self.cat_img, text="")
+            self.cat_label.place(relx=1.0, rely=1.0, x=-5, y=-5, anchor="se")
+        except:
+            pass
+
+    def on_sair(self):
+        kill_current_process()
+        self.quit()
+
+    def run_script(self, script_path):
+        run_program(script_path, self.debug_text)
+
+    def toggle_db_view(self):
+        if self.debug_frame.winfo_ismapped():
+            self.debug_frame.pack_forget()
+            self.db_frame.pack(fill="both", expand=True)
+        else:
+            self.db_frame.pack_forget()
+            self.debug_frame.pack(fill="both", expand=True)
+
+    # -------------------------------
+    # Seção Database
+    # -------------------------------
+    def create_db_area(self):
+        self.db_title = ctk.CTkLabel(self.db_frame, text="Consulta Database de Servos", font=("Helvetica", 18, "bold"))
+        self.db_title.pack(pady=10)
+
+        self.filters_flow_frame = ctk.CTkFrame(self.db_frame, height=120)
+        self.filters_flow_frame.pack(fill="x", padx=10, pady=5)
+        self.filters_flow_frame.bind("<Configure>", self.on_filters_flow_configure)
+
+        self.filter_blocks = []
+
+        def add_filter_block(label_text):
+            block_frame = ctk.CTkFrame(self.filters_flow_frame)
+            lbl = ctk.CTkLabel(block_frame, text=label_text)
+            ent = ctk.CTkEntry(block_frame, width=100)
+            lbl.pack(side="left", padx=5, pady=5)
+            ent.pack(side="left", padx=5, pady=5)
+            block_frame.update_idletasks()
+            return block_frame, ent
+
+        self.block_torque_min, self.ent_torque_min = add_filter_block("Torque mín (kgf.cm):")
+        self.block_weight_max, self.ent_weight_max = add_filter_block("Peso máx (g):")
+        self.block_length_max, self.ent_length_max = add_filter_block("Compr. máx (mm):")
+        self.block_width_max, self.ent_width_max = add_filter_block("Larg. máx (mm):")
+        self.block_height_max, self.ent_height_max = add_filter_block("Altura máx (mm):")
+        self.block_speed_min, self.ent_speed_min = add_filter_block("Vel. ang mín (°/s):")
+        self.block_price_max, self.ent_price_max = add_filter_block("Preço máx ($):")
+
+        self.filter_blocks = [
+            self.block_torque_min,
+            self.block_weight_max,
+            self.block_length_max,
+            self.block_width_max,
+            self.block_height_max,
+            self.block_speed_min,
+            self.block_price_max
+        ]
+
+        self.btn_aplicar = ctk.CTkButton(self.db_frame, text="Aplicar Filtros", command=self.aplicar_filtros)
+        self.btn_aplicar.pack(pady=5)
+
+        self.results_frame = ctk.CTkFrame(self.db_frame)
+        self.results_frame.pack(fill="both", expand=True, padx=10, pady=10)
+
+        #self.servos_flow_frame = ctk.CTkFrame(self.results_frame)
+        #self.servos_flow_frame.pack(fill="both", expand=True)
+        #self.servos_flow_frame.bind("<Configure>", self.on_servos_flow_configure)
+
+        self.servos_scrollable_frame = ctk.CTkScrollableFrame(self.results_frame)
+        self.servos_scrollable_frame.pack(fill="both", expand=True, padx=10, pady=10)
+
+        self.servo_blocks = []
+
+    def on_filters_flow_configure(self, event):
+        flow_layout(self.filters_flow_frame, self.filter_blocks, padding_x=10, padding_y=5)
+
+    def on_servos_flow_configure(self, event):
+        flow_layout(self.servos_flow_frame, self.servo_blocks, padding_x=15, padding_y=15, margin_left=15)
+
+    def aplicar_filtros(self):
+        for sb in self.servo_blocks:
+            sb.destroy()
+        self.servo_blocks.clear()
+
+        def readfloat(entry):
+            txt = entry.get().strip()
+            if not txt:
+                return None
+            try:
+                return float(txt)
+            except:
+                return None
+
+        torque_min = readfloat(self.ent_torque_min)
+        weight_max = readfloat(self.ent_weight_max)
+        length_max = readfloat(self.ent_length_max)
+        width_max = readfloat(self.ent_width_max)
+        height_max = readfloat(self.ent_height_max)
+        speed_min = readfloat(self.ent_speed_min)
+        price_max = readfloat(self.ent_price_max)
 
         csv_path = os.path.join("Database", "servos.csv")
-        # results_text.insert("end", f"[DEBUG] Tentando abrir CSV: {csv_path}\n")
-
         if not os.path.exists(csv_path):
-            results_text.insert("end", "Arquivo de database não encontrado.\n")
+            ctk.CTkMessagebox(title="Erro", message="Arquivo de database não encontrado.")
             return
 
+        matched_results = []
         try:
-            with open(csv_path, mode="r", encoding="utf-8") as f:
-                # Ignora a primeira linha "sep=," se houver
+            with open(csv_path, "r", encoding="utf-8") as f:
                 first_line = f.readline().strip()
                 if not first_line.startswith("sep="):
-                    # Se a primeira linha não é "sep=", voltamos ao começo
                     f.seek(0)
-
-                # Lê com delimitador de vírgula
                 reader = csv.DictReader(f, delimiter=",")
 
-                count = 0
                 for row in reader:
-                    # Debug: exibe a linha lida
-                    #results_text.insert("end", f"[DEBUG] Linha lida: {row}\n")
-
-                    # Tente extrair as colunas por nome
-                    # Ajuste os nomes conforme aparecem no seu CSV
                     make = row.get("Make", "")
                     model = row.get("Model", "")
                     weight = safe_float(row.get("Weight (g)"))
@@ -304,7 +494,6 @@ def create_db_frame(parent):
                     price_str = row.get("Typical Price", "").replace("$", "")
                     price_val = safe_float(price_str)
 
-                    # Filtros
                     if torque_min is not None and max_torque < torque_min:
                         continue
                     if weight_max is not None and weight is not None and weight > weight_max:
@@ -320,214 +509,132 @@ def create_db_frame(parent):
                     if price_max is not None and price_val is not None and price_val > price_max:
                         continue
 
-                    count += 1
-                    info = (
-                        f"{count}) {make} {model}\n"
-                        f"   Peso: {weight} g | Dimensões: {L} x {C} x {A} mm\n"
-                        f"   Torque máx: {max_torque} kgf.cm | Vel máx: {max_speed} °/s\n"
-                        f"   Preço: {row.get('Typical Price','n/a')}\n\n"
-                    )
-                    results_text.insert("end", info)
-
-                if count == 0:
-                    results_text.insert("end", "Nenhum resultado encontrado (após filtros).\n")
-
+                    matched_results.append(row)
         except Exception as e:
-            results_text.insert("end", f"[ERRO] Falha ao ler CSV: {e}\n")
+            ctk.CTkMessagebox(title="Erro CSV", message=f"Falha ao ler CSV: {e}")
+            return
 
-    apply_btn = tk.Button(db_frame, text="Aplicar", bg="#403c3c", fg="white", command=aplicar_filtros)
-    apply_btn.grid(row=8, column=0, columnspan=2, pady=5)
+        if not matched_results:
+            msg = ctk.CTkLabel(self.servos_flow_frame, text="Nenhum resultado encontrado.", font=("Helvetica", 14))
+            self.servo_blocks.append(msg)
+            msg.place(x=10, y=10)
+            return
 
-    # Área de resultados
-    results_text = tk.Text(db_frame, bg="#2f2f2f", fg="white")
-    results_text.grid(row=9, column=0, columnspan=3, padx=5, pady=10, sticky="nsew")
+        # Distribuição em 5 colunas usando grid
+        for idx, row in enumerate(matched_results):
+            block = self.create_servo_block(row, parent=self.servos_scrollable_frame)
+            # Calcula a linha e coluna (5 colunas)
+            row_idx = idx // 7
+            col_idx = idx % 7
+            block.grid(row=row_idx, column=col_idx, padx=10, pady=10, sticky="n")
+            self.servo_blocks.append(block)
 
-    scrollbar = tk.Scrollbar(db_frame, command=results_text.yview)
-    results_text.configure(yscrollcommand=scrollbar.set)
-    # Deixe a scrollbar na mesma "linha" mas em outra coluna (ou ao lado)
-    scrollbar.grid(row=9, column=3, sticky="ns")
+    def create_servo_block(self, row, parent):
+        make = row.get("Make", "")
+        model = row.get("Model", "")
+        
+        block_frame = ctk.CTkFrame(parent, corner_radius=8, fg_color="#333333")
+        block_frame.configure(width=200, height=300)
 
-    return db_frame
+        # Título do bloco
+        title_str = f"{make} {model}"
+        lbl_title = ctk.CTkLabel(block_frame, text=title_str, font=("Helvetica", 12, "bold"))
+        lbl_title.pack(padx=5, pady=5)
+
+        # Label para imagem (placeholder)
+        lbl_img = ctk.CTkLabel(block_frame, text="(Carregando imagem...)")
+        lbl_img.pack(padx=5, pady=5)
+        
+        # Carrega a imagem de forma assíncrona
+        def load_image_async():
+            print("Buscando imagem para:", model)
+            image_path = fetch_image_for_model(model)
+            if image_path and os.path.exists(image_path):
+                try:
+                    img_raw = Image.open(image_path)
+                    img_raw.thumbnail((80, 80))
+                    servo_imgtk = ImageTk.PhotoImage(img_raw)
+                    # Atualiza o label na thread principal
+                    def update_label():
+                        lbl_img.configure(image=servo_imgtk, text="")
+                        lbl_img.image = servo_imgtk
+                    lbl_img.after(0, update_label)
+                except Exception as e:
+                    def update_label_error():
+                        lbl_img.configure(text="(Erro na imagem)")
+                    lbl_img.after(0, update_label_error)
+            else:
+                def update_label_no_image():
+                    lbl_img.configure(text="(Sem imagem)")
+                lbl_img.after(0, update_label_no_image)
+
+        threading.Thread(target=load_image_async, daemon=True).start()
+
+        # Montando a descrição
+        desc_lines = []
+        if row.get("Make"):
+            desc_lines.append(f"Fabricante: {row.get('Make')}")
+        if row.get("Model"):
+            desc_lines.append(f"Modelo: {row.get('Model')}")
+        if row.get("Modulacao"):
+            desc_lines.append(f"Modulacao: {row.get('Modulacao')}")
+        if row.get("Typical Price"):
+            desc_lines.append(f"Preço: {row.get('Typical Price')}")
+        if row.get("Weight (g)"):
+            desc_lines.append(f"Peso (g): {row.get('Weight (g)')}")
+        if row.get("L (mm)") or row.get("C (mm)") or row.get("A (mm)"):
+            l = row.get("L (mm)") or ""
+            c = row.get("C (mm)") or ""
+            a = row.get("A (mm)") or ""
+            desc_lines.append(f"LxCxA (mm): {l}x{c}x{a}")
+
+        # Torque
+        torque_lines = []
+        for i in range(1, 6):
+            tensao_key = f"TensãoTorque{i}"
+            torque_key = f"Torque{i} (kgf.cm)"
+            tensao = row.get(tensao_key)
+            torque = row.get(torque_key)
+            if tensao or torque:
+                tensao_str = tensao if tensao else ""
+                torque_str = torque if torque else ""
+                torque_lines.append(f"{tensao_str} {torque_str}".strip())
+        if torque_lines:
+            desc_lines.append("Torque (kgf.cm):")
+            desc_lines.extend(torque_lines)
+
+        # Velocidade
+        speed_lines = []
+        for i in range(1, 6):
+            tensao_key = f"TensãoSpeed{i}"
+            speed_key = f"Speed{i} (°/s)"
+            tensao_speed = row.get(tensao_key)
+            speed_val = row.get(speed_key)
+            if tensao_speed or speed_val:
+                tensao_speed_str = tensao_speed if tensao_speed else ""
+                speed_str = speed_val if speed_val else ""
+                speed_lines.append(f"{tensao_speed_str} {speed_str}".strip())
+        if speed_lines:
+            desc_lines.append("Velocidade (°/s):")
+            desc_lines.extend(speed_lines)
+
+        # Outras informações
+        if row.get("Tipo motor"):
+            desc_lines.append(f"Tipo motor: {row.get('Tipo motor')}")
+        if row.get("Rotação"):
+            desc_lines.append(f"Rotação: {row.get('Rotação')}")
+        if row.get("Material eng."):
+            desc_lines.append(f"Material eng.: {row.get('Material eng.')}")
+
+        desc_text = "\n".join(desc_lines)
+        lbl_desc = ctk.CTkLabel(block_frame, text=desc_text, font=("Helvetica", 10), justify="left")
+        lbl_desc.pack(padx=5, pady=5)
+
+        return block_frame
 
 def main():
-    root = tk.Tk()
-    root.title("Super Validador de Servos")
-    root.geometry("1600x920")
-    root.configure(bg="#212121")
-
-    top_frame = tk.Frame(root, bg="#212121")
-    top_frame.pack(side="top", fill="x")
-
-    title_label = tk.Label(
-        top_frame,
-        text="SUPER VALIDADOR DE SERVOS",
-        font=("Helvetica", 32, "bold"),
-        bg="#212121",
-        fg="white"
-    )
-    title_label.pack(side="left", padx=20, pady=20)
-
-    try:
-        logo_img_raw = Image.open(LOGO_PATH)
-        logo_img = ImageTk.PhotoImage(logo_img_raw)
-        logo_label = tk.Label(top_frame, image=logo_img, bg="#212121")
-        logo_label.image = logo_img
-        logo_label.pack(side="right", padx=20)
-    except:
-        pass
-
-    main_frame = tk.Frame(root, bg="#212121")
-    main_frame.pack(fill="both", expand=True, padx=10, pady=10)
-
-    # Frame esquerdo
-    left_frame = tk.Frame(main_frame, bg="#212121")
-    left_frame.pack(side="left", fill="y")
-
-    btn_style = {
-        "width": 25,
-        "height": 2,
-        "bg": "#403c3c",
-        "fg": "white",
-        "font": ("Helvetica", 12, "bold"),
-        "relief": "raised"
-    }
-
-    # Frame direito (onde alternamos debug x db)
-    right_frame = tk.Frame(main_frame, bg="#212121")
-    right_frame.pack(side="right", fill="both", expand=True)
-
-    # ========== Frame de Debug ==========
-    debug_frame = tk.Frame(right_frame, bg="#212121")
-    debug_frame.pack(fill="both", expand=True)  # visível inicialmente
-
-    instructions_label = tk.Label(
-        debug_frame,
-        text=INSTRUCTIONS,
-        font=("Helvetica", 12),
-        bg="#2f2f2f",
-        fg="white",
-        justify="left",
-        anchor="n"
-    )
-    instructions_label.pack(padx=20, pady=(20, 5), anchor="n", fill="x")
-
-    debug_text = tk.Text(debug_frame, height=10, bg="#1e1e1e", fg="white")
-    debug_text.pack(padx=10, pady=(0, 10), fill="both", expand=True)
-
-    scrollbar = tk.Scrollbar(debug_text, command=debug_text.yview)
-    debug_text.configure(yscrollcommand=scrollbar.set)
-    scrollbar.pack(side="right", fill="y")
-
-    command_frame = tk.Frame(debug_frame, bg="#2f2f2f")
-    command_frame.pack(fill="x", pady=(0, 10))
-
-    tk.Label(command_frame, text="Comando:", bg="#2f2f2f", fg="white").pack(side="left", padx=5)
-    entry_cmd = tk.Entry(command_frame, width=30)
-    entry_cmd.pack(side="left", padx=5)
-
-    tk.Button(
-        command_frame,
-        text="Enviar",
-        command=lambda: send_command_to_process(entry_cmd, debug_text),
-        bg="#403c3c",
-        fg="white",
-        font=("Helvetica", 10, "bold")
-    ).pack(side="left", padx=5)
-
-    # ========== Frame de Database ==========
-    db_frame = create_db_frame(right_frame)
-    db_frame.pack_forget()  # escondido inicialmente
-
-    def toggle_db_view():
-        if debug_frame.winfo_ismapped():
-            debug_frame.pack_forget()
-            db_frame.pack(fill="both", expand=True)
-        else:
-            db_frame.pack_forget()
-            debug_frame.pack(fill="both", expand=True)
-
-    # Botões do lado esquerdo
-    tk.Button(
-        left_frame,
-        text="Simulador Servo/Mola",
-        command=lambda: run_program(MOLA_SCRIPT, debug_text),
-        **btn_style
-    ).pack(pady=10)
-
-    tk.Button(
-        left_frame,
-        text="Simulador Servo/Peso",
-        command=lambda: run_program(PESO_SCRIPT, debug_text),
-        **btn_style
-    ).pack(pady=10)
-
-    tk.Button(
-        left_frame,
-        text="Simulador Elevon",
-        command=lambda: run_program(AVIAO_SCRIPT, debug_text),
-        **btn_style
-    ).pack(pady=10)
-
-    # Dropdown de portas
-    dropdown_frame = tk.Frame(left_frame, bg="#212121")
-    dropdown_frame.pack(pady=(15, 5))
-
-    tk.Label(dropdown_frame, text="Portas:", bg="#212121", fg="white").pack(side="left", padx=5)
-
-    ports = get_serial_ports()
-    if not ports:
-        ports = ["Nenhuma Porta Encontrada"]
-
-    selected_port_var = tk.StringVar(dropdown_frame)
-    selected_port_var.set("Selecione a Porta")
-
-    port_menu = tk.OptionMenu(
-        dropdown_frame,
-        selected_port_var,
-        *ports,
-        command=on_port_selected
-    )
-    port_menu.config(width=15, bg="#403c3c", fg="white", font=("Helvetica", 10))
-    port_menu.pack(side="left", padx=5)
-
-    tk.Button(
-        left_frame,
-        text="Controle de Servo",
-        command=lambda: on_controle_button(debug_text),
-        **btn_style
-    ).pack(pady=10)
-
-    tk.Button(
-        left_frame,
-        text="Consulta Database",
-        command=toggle_db_view,
-        **btn_style
-    ).pack(pady=10)
-
-    tk.Button(
-        left_frame,
-        text="Sair",
-        command=lambda: [kill_current_process(), root.quit()],
-        bg="#dd0734",
-        fg="white",
-        font=("Helvetica", 12, "bold"),
-        relief="groove",
-        width=25,
-        height=2
-    ).pack(side="bottom", pady=(40, 10))
-
-    # Gato no canto (opcional)
-    try:
-        cat_img_raw = Image.open(CAT_PATH)
-        cat_img_raw = cat_img_raw.resize((50, 50), Image.LANCZOS)
-        cat_img = ImageTk.PhotoImage(cat_img_raw)
-        cat_label = tk.Label(root, image=cat_img, bg="#212121")
-        cat_label.image = cat_img
-        cat_label.place(relx=1.0, rely=1.0, x=-5, y=-5, anchor="se")
-    except:
-        pass
-
-    root.mainloop()
+    app = ServoValidatorApp()
+    app.mainloop()
 
 if __name__ == "__main__":
     main()
