@@ -39,8 +39,9 @@ INSTRUCTIONS = (
     "1. Simulador Servo/Mola\n"
     "2. Simulador Servo/Peso\n"
     "3. Simulador Elevon (3D)\n"
-    "4. Controle de Servos: Gerenciamento via comunicação serial\n"
-    "5. Consulta Database: Procura o servo perfeito\n\n"
+    "4. Cadastrar Servo cadastra um servo :0\n"
+    "5. Controle de Servos: Gerenciamento via comunicação serial\n"
+    "6. Consulta Database: Procura o servo perfeito\n\n"
     "Abaixo, você verá as mensagens de DEBUG de cada script.\n"
     "Quando o script controle.py estiver ativo, você pode enviar comandos."
 )
@@ -102,7 +103,7 @@ def fetch_image_for_model(model_name):
 ###############################################################################
 #                           FUNÇÕES DE LAYOUT (FLOW)                          #
 ###############################################################################
-def flow_layout(parent, blocks, padding_x=10, padding_y=10, margin_left=10):
+def flow_layout(parent, blocks, padding_x=0, padding_y=10, margin_left=10):
     parent_width = parent.winfo_width()
     if parent_width <= 0:
         return
@@ -240,7 +241,7 @@ class ServoValidatorApp(ctk.CTk):
         super().__init__()
 
         self.title("Super Validador de Servos")
-        self.geometry("1600x920")
+        self.geometry("1500x820")
 
         # Frame superior
         self.top_frame = ctk.CTkFrame(self)
@@ -252,6 +253,13 @@ class ServoValidatorApp(ctk.CTk):
             font=("Helvetica", 32, "bold")
         )
         self.title_label.pack(side="left", padx=20, pady=20)
+
+        self.title_label = ctk.CTkLabel(
+            self.top_frame,
+            text="by Euler Torres",
+            font=("Helvetica", 12)
+        )
+        self.title_label.pack(side="left", padx=10, pady=20)
 
         # Logo
         try:
@@ -400,14 +408,14 @@ class ServoValidatorApp(ctk.CTk):
         self.db_title.pack(pady=10)
 
         self.filters_flow_frame = ctk.CTkFrame(self.db_frame, height=120)
-        self.filters_flow_frame.pack(fill="x", padx=10, pady=5)
+        self.filters_flow_frame.pack(fill="x", padx=5, pady=3)
         self.filters_flow_frame.bind("<Configure>", self.on_filters_flow_configure)
 
         # Função auxiliar para criar blocos de filtro
         def add_filter_block(label_text):
             block_frame = ctk.CTkFrame(self.filters_flow_frame)
             lbl = ctk.CTkLabel(block_frame, text=label_text)
-            ent = ctk.CTkEntry(block_frame, width=100)
+            ent = ctk.CTkEntry(block_frame, width=90)
             lbl.pack(side="left", padx=5, pady=5)
             ent.pack(side="left", padx=5, pady=5)
             block_frame.update_idletasks()
@@ -556,13 +564,15 @@ class ServoValidatorApp(ctk.CTk):
         
         # Título do servo
         make = row.get("Make", "")
+        lbl_title = ctk.CTkLabel(block_frame, text=make, font=("Helvetica", 16, "bold"))
+        lbl_title.pack(padx=5, pady=1)
+
         model = row.get("Model", "")
-        title_str = f"{make} {model}"
-        lbl_title = ctk.CTkLabel(block_frame, text=title_str, font=("Helvetica", 20, "bold"))
+        lbl_title = ctk.CTkLabel(block_frame, text=model, font=("Helvetica", 20, "bold"))
         lbl_title.pack(padx=5, pady=5)
 
         # Placeholder para a imagem (quadrado fixo)
-        lbl_img = ctk.CTkLabel(block_frame, text="(Imagem)", width=80, height=80)
+        lbl_img = ctk.CTkLabel(block_frame, text="(Baixando Imagem da web... PERAI)", width=80, height=80)
         lbl_img.pack(padx=5, pady=5)
 
         # Informações abaixo do placeholder
@@ -576,19 +586,35 @@ class ServoValidatorApp(ctk.CTk):
         if row.get("Typical Price"):
             desc_lines.append(f"Preço: {row.get('Typical Price')}")
         if row.get("Weight (g)"):
-            desc_lines.append(f"Peso (g): {row.get('Weight (g)')}")
+            desc_lines.append(f"Peso: {row.get('Weight (g)')}g")
         L = row.get("L (mm)") or ""
         C = row.get("C (mm)") or ""
         A = row.get("A (mm)") or ""
         if L or C or A:
-            desc_lines.append(f"LxCxA (mm): {L}x{C}x{A}")
-
+            desc_lines.append(f"LxCxA: {L}x{C}x{A}mm")
+        Tensao1 = row.get("TensãoTorque1")
+        Tensao2 = row.get("TensãoTorque2")
+        Tensao3 = row.get("TensãoTorque3")
+        Tensao4 = row.get("TensãoTorque4")
+        Tensao5 = row.get("TensãoTorque5")
+        if Tensao1 or Tensao2 or Tensao3 or Tensao4 or Tensao5:
+            desc_lines.append(f"Tensão (V) x Torque (kgf.cm)")
+            if Tensao1:
+                desc_lines.append(f"    | @{Tensao1}V - {row.get('Torque1 (kgf.cm)')}kgf.m |")
+            if Tensao2:
+                desc_lines.append(f"    | @{Tensao2}V - {row.get('Torque2 (kgf.cm)')}kgf.m |")
+            if Tensao3:
+                desc_lines.append(f"    | @{Tensao3}V - {row.get('Torque3 (kgf.cm)')}kgf.m |")
+            if Tensao4:
+                desc_lines.append(f"    | @{Tensao4}V - {row.get('Torque4 (kgf.cm)')}kgf.m |")
+            if Tensao5:
+                desc_lines.append(f"    | @{Tensao5}V - {row.get('Torque5 (kgf.cm)')}kgf.m |")
         desc_text = "\n".join(desc_lines)
         lbl_desc = ctk.CTkLabel(block_frame, text=desc_text, font=("Helvetica", 15), justify="left")
         lbl_desc.pack(padx=5, pady=5)
 
         def open_datasheet():
-            datasheet_path = os.path.join("Database", "Datasheets", f"{model.replace(' ', '_')}.pdf")
+            datasheet_path = os.path.join("Database", "Datasheets", f"{model}.pdf")
             if os.path.exists(datasheet_path):
                 try:
                     if sys.platform.startswith('win'):
@@ -627,7 +653,7 @@ class ServoValidatorApp(ctk.CTk):
             except Exception as e:
                 lbl_img.after(0, lambda: lbl_img.configure(text="(Erro na imagem)"))
         else:
-            lbl_img.after(0, lambda: lbl_img.configure(text="(Sem imagem)"))
+            lbl_img.after(0, lambda: lbl_img.configure(text="Num achei imagem :("))
 
 def main():
     app = ServoValidatorApp()
