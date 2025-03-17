@@ -1,12 +1,11 @@
 import os
-import csv
+import json
 import shutil
 import customtkinter as ctk
 from tkinter import filedialog as fd
-from tkinter import messagebox  # <-- Usando messagebox do tkinter
-from PIL import Image  # Para carregar imagens (logo e gato)
+from tkinter import messagebox  # Para exibir mensagens de aviso/erro
+from PIL import Image
 
-# Configuração de tema e aparência
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("dark-blue")
 
@@ -15,26 +14,13 @@ script_dir = os.path.dirname(os.path.abspath(__file__))  # pasta do Add_servo.py
 repo_dir   = os.path.dirname(script_dir)                 # pasta raiz do repositório
 
 # Diretórios de destino
-CSV_PATH = os.path.join(repo_dir, "Database", "servos.csv")
-IMAGES_DIR = os.path.join(repo_dir, "Database", "Images")
+JSON_PATH   = os.path.join(repo_dir, "Database", "servos.json")   # <-- Agora é JSON
+IMAGES_DIR  = os.path.join(repo_dir, "Database", "Images")
 DATASHEETS_DIR = os.path.join(repo_dir, "Database", "Datasheets")
 
 # Cria as pastas caso não existam
 os.makedirs(IMAGES_DIR, exist_ok=True)
 os.makedirs(DATASHEETS_DIR, exist_ok=True)
-
-# Cabeçalho esperado no CSV (incluindo a nova coluna "Link" no final)
-CSV_HEADER = [
-    "Make","Model","Modulation","Weight (g)","L (mm)","C (mm)","A (mm)",
-    "TensãoTorque1","Torque1 (kgf.cm)","TensãoTorque2","Torque2 (kgf.cm)",
-    "TensãoTorque3","Torque3 (kgf.cm)","TensãoTorque4","Torque4 (kgf.cm)",
-    "TensãoTorque5","Torque5 (kgf.cm)",
-    "TensãoSpeed1","Speed1 (°/s)","TensãoSpeed2","Speed2 (°/s)",
-    "TensãoSpeed3","Speed3 (°/s)","TensãoSpeed4","Speed4 (°/s)",
-    "TensãoSpeed5","Speed5 (°/s)",
-    "Motor Type","Rotation","Gear Material","Typical Price",
-    "Link"
-]
 
 class ServoRegistrationApp(ctk.CTk):
     def __init__(self):
@@ -50,7 +36,6 @@ class ServoRegistrationApp(ctk.CTk):
         top_frame = ctk.CTkFrame(self)
         top_frame.pack(side="top", fill="x", pady=10)
 
-        # Título
         title_label = ctk.CTkLabel(
             top_frame, 
             text="CADASTRO DE UM NOVO SERVO",
@@ -58,7 +43,7 @@ class ServoRegistrationApp(ctk.CTk):
         )
         title_label.pack(side="left", padx=10)
 
-        # Logo ao lado do título
+        # Tenta carregar a logo
         try:
             logo_path = os.path.join(script_dir, "Xmobots_logo.png")
             logo_img = Image.open(logo_path)
@@ -74,11 +59,9 @@ class ServoRegistrationApp(ctk.CTk):
         main_frame = ctk.CTkFrame(self)
         main_frame.pack(fill="both", expand=True, padx=10, pady=10)
 
-        # Frame de inputs
         inputs_frame = ctk.CTkFrame(main_frame)
         inputs_frame.pack(fill="both", expand=True, pady=10)
 
-        # Função auxiliar para criar label+entry em grid
         def create_labeled_entry(parent, label_text, row, column, width=150):
             lbl = ctk.CTkLabel(parent, text=label_text)
             lbl.grid(row=row, column=column*2, padx=5, pady=5, sticky="e")
@@ -100,11 +83,11 @@ class ServoRegistrationApp(ctk.CTk):
             values=modulation_options,
             variable=self.modulation_var,
             width=100,
-            fg_color="green",           # <-- Cor de fundo do dropdown
-            button_color="green",       # <-- Cor do botão
-            button_hover_color="#006400",  # <-- Hover do botão
-            dropdown_fg_color="green",  # <-- Fundo do menu ao abrir
-            dropdown_hover_color="#006400" # <-- Hover dos itens do menu
+            fg_color="green",
+            button_color="green",
+            button_hover_color="#006400",
+            dropdown_fg_color="green",
+            dropdown_hover_color="#006400"
         )
         self.option_modulation.grid(row=0, column=5, padx=5, pady=5, sticky="w")
 
@@ -220,7 +203,6 @@ class ServoRegistrationApp(ctk.CTk):
         )
         btn_select_pdf.grid(row=0, column=1, padx=10)
 
-        # Labels que mostram o caminho escolhido
         self.label_image_path = ctk.CTkLabel(file_buttons_frame, text="Nenhuma imagem selecionada")
         self.label_image_path.grid(row=1, column=0, columnspan=2, pady=5)
 
@@ -241,7 +223,7 @@ class ServoRegistrationApp(ctk.CTk):
         try:
             cat_path = os.path.join(script_dir, "gato_terno.png")
             cat_img = Image.open(cat_path)
-            cat_img.thumbnail((80, 80))  # Ajuste o tamanho conforme desejar
+            cat_img.thumbnail((80, 80))
             self.cat_imgtk = ctk.CTkImage(dark_image=cat_img, size=(80, 80))
             self.cat_label = ctk.CTkLabel(self, image=self.cat_imgtk, text="")
             self.cat_label.place(relx=1.0, rely=1.0, x=-10, y=-10, anchor="se")
@@ -250,7 +232,6 @@ class ServoRegistrationApp(ctk.CTk):
 
         # =============== CONVERSOR NO CANTO INFERIOR-ESQUERDO ===============
         converter_frame = ctk.CTkFrame(self, corner_radius=8)
-        # Para bottom-left: relx=0, rely=1, anchor="sw"
         converter_frame.place(relx=0, rely=1, anchor="sw", x=10, y=-10)
 
         label_converter_title = ctk.CTkLabel(converter_frame, text="N.m -> kgf.cm", font=("Helvetica", 12, "bold"))
@@ -272,17 +253,14 @@ class ServoRegistrationApp(ctk.CTk):
         btn_convert.pack(pady=5)
 
     def do_conversion(self):
-        """Converte de N.m para kgf.cm"""
         try:
             nm = float(self.entry_nm.get())
-            # 1 N.m = ~10.19716213 kgf.cm
             kgfcm = nm * 10.19716213
             self.label_result.configure(text=f"{kgfcm:.2f} kgf.cm")
         except ValueError:
             self.label_result.configure(text="Valor inválido")
 
     def select_image(self):
-        """Abre um diálogo para o usuário selecionar a imagem do servo."""
         filetypes = [("Arquivos de Imagem", "*.jpg *.jpeg *.png *.bmp *.gif"), ("Todos os arquivos", "*.*")]
         path = fd.askopenfilename(title="Selecione a imagem do servo", filetypes=filetypes)
         if path:
@@ -290,7 +268,6 @@ class ServoRegistrationApp(ctk.CTk):
             self.label_image_path.configure(text=f"Imagem selecionada: {path}")
 
     def select_pdf(self):
-        """Abre um diálogo para o usuário selecionar o PDF do servo."""
         filetypes = [("Arquivos PDF", "*.pdf"), ("Todos os arquivos", "*.*")]
         path = fd.askopenfilename(title="Selecione o datasheet em PDF", filetypes=filetypes)
         if path:
@@ -298,65 +275,78 @@ class ServoRegistrationApp(ctk.CTk):
             self.label_pdf_path.configure(text=f"PDF selecionado: {path}")
 
     def cadastrar_servo(self):
-        """Coleta dados, salva no CSV e copia arquivos (imagem e PDF) para as pastas apropriadas."""
-        row_data = [
-            self.entry_make.get().strip(),
-            self.entry_model.get().strip(),
-            self.modulation_var.get().strip(),
-            self.entry_weight.get().strip(),
-            self.entry_l.get().strip(),
-            self.entry_c.get().strip(),
-            self.entry_a.get().strip(),
-
-            self.entry_tensao_torque1.get().strip(),
-            self.entry_torque1.get().strip(),
-            self.entry_tensao_torque2.get().strip(),
-            self.entry_torque2.get().strip(),
-            self.entry_tensao_torque3.get().strip(),
-            self.entry_torque3.get().strip(),
-            self.entry_tensao_torque4.get().strip(),
-            self.entry_torque4.get().strip(),
-            self.entry_tensao_torque5.get().strip(),
-            self.entry_torque5.get().strip(),
-
-            # TensãoSpeed1 = TensãoTorque1
-            self.entry_tensao_torque1.get().strip(),
-            self.entry_speed1.get().strip(),
-            # TensãoSpeed2 = TensãoTorque2
-            self.entry_tensao_torque2.get().strip(),
-            self.entry_speed2.get().strip(),
-            # TensãoSpeed3 = TensãoTorque3
-            self.entry_tensao_torque3.get().strip(),
-            self.entry_speed3.get().strip(),
-            # TensãoSpeed4 = TensãoTorque4
-            self.entry_tensao_torque4.get().strip(),
-            self.entry_speed4.get().strip(),
-            # TensãoSpeed5 = TensãoTorque5
-            self.entry_tensao_torque5.get().strip(),
-            self.entry_speed5.get().strip(),
-
-            self.motor_type_var.get().strip(),
-            self.rotation_var.get().strip(),
-            self.gear_material_var.get().strip(),
-            self.entry_price.get().strip(),
-            self.entry_link.get().strip()  # <-- Link de compra
-        ]
-
+        """Coleta dados, salva no JSON e copia arquivos (imagem e PDF) para as pastas apropriadas."""
         model_name = self.entry_model.get().strip()
         if not model_name:
             messagebox.showwarning("Aviso", "Campo 'Modelo' não pode ficar vazio.")
             return
 
-        # Salva no CSV
-        file_exists = os.path.exists(CSV_PATH)
+        # Monta o dicionário com todos os campos (igual as colunas do CSV)
+        servo_dict = {
+            "Make":            self.entry_make.get().strip(),
+            "Model":           model_name,
+            "Modulation":      self.modulation_var.get().strip(),
+            "Weight (g)":      self.entry_weight.get().strip(),
+            "L (mm)":          self.entry_l.get().strip(),
+            "C (mm)":          self.entry_c.get().strip(),
+            "A (mm)":          self.entry_a.get().strip(),
+
+            "TensãoTorque1":   self.entry_tensao_torque1.get().strip(),
+            "Torque1 (kgf.cm)": self.entry_torque1.get().strip(),
+            "TensãoTorque2":   self.entry_tensao_torque2.get().strip(),
+            "Torque2 (kgf.cm)": self.entry_torque2.get().strip(),
+            "TensãoTorque3":   self.entry_tensao_torque3.get().strip(),
+            "Torque3 (kgf.cm)": self.entry_torque3.get().strip(),
+            "TensãoTorque4":   self.entry_tensao_torque4.get().strip(),
+            "Torque4 (kgf.cm)": self.entry_torque4.get().strip(),
+            "TensãoTorque5":   self.entry_tensao_torque5.get().strip(),
+            "Torque5 (kgf.cm)": self.entry_torque5.get().strip(),
+
+            # TensãoSpeed1 = TensãoTorque1
+            "TensãoSpeed1":    self.entry_tensao_torque1.get().strip(),
+            "Speed1 (°/s)":    self.entry_speed1.get().strip(),
+            # TensãoSpeed2 = TensãoTorque2
+            "TensãoSpeed2":    self.entry_tensao_torque2.get().strip(),
+            "Speed2 (°/s)":    self.entry_speed2.get().strip(),
+            # TensãoSpeed3 = TensãoTorque3
+            "TensãoSpeed3":    self.entry_tensao_torque3.get().strip(),
+            "Speed3 (°/s)":    self.entry_speed3.get().strip(),
+            # TensãoSpeed4 = TensãoTorque4
+            "TensãoSpeed4":    self.entry_tensao_torque4.get().strip(),
+            "Speed4 (°/s)":    self.entry_speed4.get().strip(),
+            # TensãoSpeed5 = TensãoTorque5
+            "TensãoSpeed5":    self.entry_tensao_torque5.get().strip(),
+            "Speed5 (°/s)":    self.entry_speed5.get().strip(),
+
+            "Motor Type":      self.motor_type_var.get().strip(),
+            "Rotation":        self.rotation_var.get().strip(),
+            "Gear Material":   self.gear_material_var.get().strip(),
+            "Typical Price":   self.entry_price.get().strip(),
+            "Link":            self.entry_link.get().strip()
+        }
+
+        # Carrega (ou cria) o JSON
+        data = {"servos": []}  # estrutura inicial
+        if os.path.exists(JSON_PATH):
+            try:
+                with open(JSON_PATH, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    # Esperamos que data tenha a chave "servos" como lista
+                    if "servos" not in data:
+                        data["servos"] = []
+            except Exception as e:
+                messagebox.showerror("Erro", f"Falha ao ler JSON:\n{e}")
+                return
+
+        # Adiciona o novo servo
+        data["servos"].append(servo_dict)
+
+        # Salva de volta no JSON
         try:
-            with open(CSV_PATH, mode="a", encoding="utf-8", newline="") as f:
-                writer = csv.writer(f)
-                if not file_exists:
-                    writer.writerow(CSV_HEADER)
-                writer.writerow(row_data)
+            with open(JSON_PATH, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
         except Exception as e:
-            messagebox.showerror("Erro", f"Erro ao escrever no CSV:\n{e}")
+            messagebox.showerror("Erro", f"Falha ao escrever JSON:\n{e}")
             return
 
         # Substitui espaços por underscores no nome do modelo ao salvar os arquivos
@@ -385,7 +375,6 @@ class ServoRegistrationApp(ctk.CTk):
         messagebox.showinfo("Sucesso", "Servo cadastrado com sucesso!")
 
     def clear_fields(self):
-        """Limpa todos os campos de texto e as variáveis de arquivo."""
         self.entry_make.delete(0, "end")
         self.entry_model.delete(0, "end")
         self.modulation_var.set("Analog")
