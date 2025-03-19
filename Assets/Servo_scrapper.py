@@ -409,39 +409,95 @@ class HTMLDownloaderApp(ctk.CTk):
             self.show_scary_alert("Erro", f"Nenhum arquivo HTML encontrado em {site_dir}")
             return
 
+        # Lê apenas o primeiro HTML para checar se nome_ex e url_ex existem
         first_html_path = os.path.join(site_dir, html_files[0])
         with open(first_html_path, "r", encoding="utf-8") as f:
             first_html_content = f.read()
-            print("Lendo: ", first_html_content)
+
+        # Mostra debug sobre o primeiro arquivo
+        print(f"[DEBUG] Primeiro arquivo: {first_html_path}")
+        print(f"[DEBUG] Tamanho do conteúdo: {len(first_html_content)} bytes")
 
         if url_ex not in first_html_content:
+            print("[DEBUG] URL de exemplo não encontrada no primeiro HTML.")
             self.show_scary_alert("Aviso", "URL de exemplo não encontrada no primeiro HTML.")
         if nome_ex not in first_html_content:
+            print("[DEBUG] Nome de exemplo não encontrado no primeiro HTML.")
             self.show_scary_alert("Aviso", "Nome de exemplo não encontrado no primeiro HTML.")
 
-        pattern = re.compile(r'<a\s+href="([^"]+)"[^>]*>.*?<h2>([^<]+)</h2>', re.DOTALL)
+        # 1) Padrão original (ex.: <a href="..."><h2>...</h2>)
+        pattern1 = re.compile(r'<a\s+href="([^"]+)"[^>]*>.*?<h2>([^<]+)</h2>', re.DOTALL)
+
+        # 2) Padrão fallback (ex.: dspowerservo.com)
+        pattern2 = re.compile(
+            r'<(?:span\s+class="item_img"|h3\s+class="item_title")>.*?<a\s+href="([^"]+)"[^>]*\s+title="([^"]+)"',
+            re.DOTALL
+        )
+
+        # 3) Outro fallback (se precisar)
+        pattern3 = re.compile(
+            r'<span\s+class="item_img">\s*<a\s+href="([^"]+)"\s+title="([^"]+)"',
+            re.DOTALL
+        )
 
         self.matches_by_file.clear()
         all_results = []
 
-        for html_file in html_files:
-            full_path = os.path.join(site_dir, html_file)
-            with open(full_path, "r", encoding="utf-8") as f:
+        def apply_pattern_to_file(filepath, pattern, pattern_name):
+            """Aplica um pattern regex, retorna lista (url, name). Mostra debug do que achou."""
+            with open(filepath, "r", encoding="utf-8") as f:
                 content = f.read()
             matches = pattern.findall(content)
+            if matches:
+                print(f"[DEBUG] {pattern_name}: {os.path.basename(filepath)} encontrou {len(matches)} correspondências.")
+            else:
+                print(f"[DEBUG] {pattern_name}: {os.path.basename(filepath)} não encontrou nada.")
+            return matches
+
+        # --------------- Tenta pattern1 ---------------
+        print("[DEBUG] Tentando pattern1 (<a href=...><h2>...</h2>)")
+        for html_file in html_files:
+            full_path = os.path.join(site_dir, html_file)
+            matches = apply_pattern_to_file(full_path, pattern1, "pattern1")
             if matches:
                 self.matches_by_file[html_file] = matches
                 for (u, n) in matches:
                     all_results.append((html_file, u, n))
 
+        # Se não encontrou nada, tenta pattern2
+        if not all_results:
+            print("[DEBUG] Nenhum resultado no pattern1, tentando pattern2 (<span class=\"item_img\">... title=\"...\")")
+            for html_file in html_files:
+                full_path = os.path.join(site_dir, html_file)
+                matches = apply_pattern_to_file(full_path, pattern2, "pattern2")
+                if matches:
+                    self.matches_by_file[html_file] = matches
+                    for (u, n) in matches:
+                        all_results.append((html_file, u, n))
+
+        # Se ainda não encontrou nada, tenta pattern3
+        if not all_results:
+            print("[DEBUG] Nenhum resultado no pattern2, tentando pattern3 (versão simplificada do pattern dspowerservo).")
+            for html_file in html_files:
+                full_path = os.path.join(site_dir, html_file)
+                matches = apply_pattern_to_file(full_path, pattern3, "pattern3")
+                if matches:
+                    self.matches_by_file[html_file] = matches
+                    for (u, n) in matches:
+                        all_results.append((html_file, u, n))
+
+        # Limpa a área de resultados
         for widget in self.scrollable_results.winfo_children():
             widget.destroy()
         self.result_checkboxes = []
 
         if not all_results:
             ctk.CTkLabel(self.scrollable_results, text="Nenhum resultado encontrado.").pack()
+            print("[DEBUG] Nenhum resultado em nenhum pattern.")
             return
 
+        print(f"[DEBUG] Total de resultados encontrados: {len(all_results)}")
+        # Exibe os resultados em checkboxes
         for (html_file, url_found, name_found) in all_results:
             line_text = f"{html_file}: {name_found} -> {url_found}"
             var = ctk.BooleanVar(value=True)
