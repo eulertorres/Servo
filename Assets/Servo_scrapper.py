@@ -330,22 +330,188 @@ class HTMLDownloaderApp(ctk.CTk):
     #                 DOWNLOAD HTML
     # ----------------------------------------------------------
     def download_html(self):
-        # [Mesma lógica de antes...]
-        pass  # (omiti aqui para encurtar; implemente igual ao seu original)
+        """Baixa páginas HTML de URL com [P], salva em Database/Data/<nome_site>."""
+        url = self.entry_url.get().strip()
+        min_page = self.entry_min.get().strip()
+        max_page = self.entry_max.get().strip()
+
+        if not url or "[P]" not in url:
+            messagebox.showerror("Erro", "A URL deve conter o placeholder [P].")
+            return
+
+        try:
+            min_page = int(min_page)
+            max_page = int(max_page)
+        except ValueError:
+            messagebox.showerror("Erro", "Páginas mínima e máxima devem ser números inteiros.")
+            return
+
+        if min_page > max_page:
+            messagebox.showerror("Erro", "Página mínima não pode ser maior que a página máxima.")
+            return
+
+        # Extrair nome da pasta (entre "www." e o próximo ".")
+        match = re.search(r'www\.([^.]+)\.', url)
+        if match:
+            folder_name = match.group(1)
+        else:
+            messagebox.showerror("Erro", "Não foi possível extrair o nome da nova pasta da URL.")
+            return
+
+        target_dir = os.path.join(DATABASE_DIR, folder_name)
+        os.makedirs(target_dir, exist_ok=True)
+
+        # Cabeçalhos para evitar erro 406, etc.
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+        }
+
+        for page in range(min_page, max_page + 1):
+            page_url = url.replace("[P]", str(page))
+            try:
+                response = requests.get(page_url, headers=headers)
+                response.raise_for_status()
+                html_content = response.text
+                file_name = f"page_{page}.html"
+                file_path = os.path.join(target_dir, file_name)
+                with open(file_path, "w", encoding="utf-8") as f:
+                    f.write(html_content)
+            except Exception as e:
+                messagebox.showerror("Erro", f"Erro ao baixar a página {page}:\n{e}")
+                return
+
+        messagebox.showinfo("Sucesso", f"Download concluído!\nArquivos salvos em: {target_dir}")
+        self.update_site_dropdown()
 
     # ----------------------------------------------------------
     #      Localizar Padrão e Listar (Página)
     # ----------------------------------------------------------
     def find_pattern_and_list(self):
-        # [Mesma lógica do seu original...]
-        pass
+        if not self.selected_site:
+            self.show_scary_alert("Erro", "Nenhum site selecionado. Clique em 'Configurar Página' antes.")
+            return
+
+        nome_ex = self.entry_nome_ex.get().strip()
+        url_ex = self.entry_url_ex.get().strip()
+        if not nome_ex or not url_ex:
+            self.show_scary_alert("Erro", "Insira exemplo de nome e URL.")
+            return
+
+        site_dir = os.path.join(DATABASE_DIR, self.selected_site)
+        if not os.path.isdir(site_dir):
+            self.show_scary_alert("Erro", f"Pasta '{site_dir}' não existe.")
+            return
+
+        html_files = [f for f in os.listdir(site_dir) if f.endswith(".html")]
+        html_files.sort()
+        if not html_files:
+            self.show_scary_alert("Erro", f"Nenhum arquivo HTML encontrado em {site_dir}")
+            return
+
+        first_html_path = os.path.join(site_dir, html_files[0])
+        with open(first_html_path, "r", encoding="utf-8") as f:
+            first_html_content = f.read()
+            print("Lendo: ", first_html_content)
+
+        if url_ex not in first_html_content:
+            self.show_scary_alert("Aviso", "URL de exemplo não encontrada no primeiro HTML.")
+        if nome_ex not in first_html_content:
+            self.show_scary_alert("Aviso", "Nome de exemplo não encontrado no primeiro HTML.")
+
+        pattern = re.compile(r'<a\s+href="([^"]+)"[^>]*>.*?<h2>([^<]+)</h2>', re.DOTALL)
+
+        self.matches_by_file.clear()
+        all_results = []
+
+        for html_file in html_files:
+            full_path = os.path.join(site_dir, html_file)
+            with open(full_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            matches = pattern.findall(content)
+            if matches:
+                self.matches_by_file[html_file] = matches
+                for (u, n) in matches:
+                    all_results.append((html_file, u, n))
+
+        for widget in self.scrollable_results.winfo_children():
+            widget.destroy()
+        self.result_checkboxes = []
+
+        if not all_results:
+            ctk.CTkLabel(self.scrollable_results, text="Nenhum resultado encontrado.").pack()
+            return
+
+        for (html_file, url_found, name_found) in all_results:
+            line_text = f"{html_file}: {name_found} -> {url_found}"
+            var = ctk.BooleanVar(value=True)
+            chk = ctk.CTkCheckBox(
+                self.scrollable_results,
+                text=line_text,
+                variable=var,
+                fg_color="#228B22", hover_color="#006400", border_color="#228B22"
+            )
+            chk.pack(anchor="w", padx=5, pady=2)
+            self.result_checkboxes.append((chk, var, url_found, name_found))
 
     # ----------------------------------------------------------
     #        BOTÃO "Garimpar" (baixar HTMLs marcados)
     # ----------------------------------------------------------
     def garimpar_checked_results(self):
-        # [Mesma lógica do seu original...]
-        pass
+        if not self.selected_site:
+            self.show_scary_alert("Erro", "Nenhum site selecionado para garimpar.")
+            return
+
+        site_dir = os.path.join(DATABASE_DIR, self.selected_site)
+        servo_dir = os.path.join(site_dir, "servoshtml")
+        os.makedirs(servo_dir, exist_ok=True)
+
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+        }
+
+        progress_window = ctk.CTkToplevel(self)
+        progress_window.title("Garimpando HTMLs...")
+        progress_label = ctk.CTkLabel(progress_window, text="Iniciando garimpo...")
+        progress_label.pack(pady=10, padx=10)
+        progress_bar = ctk.CTkProgressBar(progress_window, width=300)
+        progress_bar.pack(pady=10, padx=10)
+        progress_bar.set(0)
+
+        checked = [(u, n) for (_, var, u, n) in self.result_checkboxes if var.get()]
+        total = len(checked)
+        if total == 0:
+            progress_window.destroy()
+            self.show_scary_alert("Aviso", "Nenhum item marcado para garimpar.")
+            return
+
+        downloaded_count = 0
+        skipped_count = 0
+
+        for i, (url_found, name_found) in enumerate(checked, start=1):
+            safe_name = re.sub(r'[^\w_-]+', '_', name_found)
+            file_path = os.path.join(servo_dir, f"{safe_name}.html")
+
+            if os.path.exists(file_path):
+                skipped_count += 1
+            else:
+                try:
+                    r = requests.get(url_found, headers=headers)
+                    r.raise_for_status()
+                    with open(file_path, "w", encoding="utf-8") as f:
+                        f.write(r.text)
+                    downloaded_count += 1
+                except Exception as e:
+                    print(f"Falha ao garimpar URL {url_found}: {e}")
+
+            progress_label.configure(text=f"Garimpando {i}/{total}...")
+            progress_bar.set(i / total)
+            progress_window.update()
+
+        progress_window.destroy()
+        msg = f"Garimpo concluído.\nBaixados: {downloaded_count}, Já existiam: {skipped_count}."
+        self.show_scary_alert("Garimpo Concluído", msg)
 
     # ----------------------------------------------------------
     #    "Configurar Servo" => Localizar Padrão (Exemplo c/ BS4)

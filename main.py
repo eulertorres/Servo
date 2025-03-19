@@ -30,6 +30,7 @@ PESO_SCRIPT = os.path.join(PROGRAMS_FOLDER, "vizual_peso.py")
 AVIAO_SCRIPT = os.path.join(PROGRAMS_FOLDER, "vizual_aviao.py")
 CONTROLE_SCRIPT = os.path.join(PROGRAMS_FOLDER, "controle.py")
 CADASTRO_SCRIPT = os.path.join(PROGRAMS_FOLDER, "Add_servo.py")  # Script de cadastro
+SCRAPPER_SCRIPT = os.path.join(PROGRAMS_FOLDER, "Servo_scrapper.py")  # Script Garimpador
 
 LOGO_PATH = os.path.join("Assets", "Xmobots_logo.png")
 CAT_PATH = os.path.join("Assets", "gato.png")
@@ -60,11 +61,9 @@ JSON_PATH = os.path.join("Database", "servos.json")
 def fetch_image_for_model(model_name):
     safe_model_name = model_name.replace(" ", "_").replace("/", "_")
     servo_folder = os.path.join(ICRAWLER_STORAGE, safe_model_name)
-    #print("Procurando imagem para servo:", safe_model_name)
     
     # Se a pasta não existir, cria-a
     if not os.path.exists(servo_folder):
-        #print("Num tem a pasta, criando entao: ", servo_folder)
         os.makedirs(servo_folder, exist_ok=True)
     # Verifica se já existe alguma imagem na pasta
     image_files = [
@@ -73,7 +72,6 @@ def fetch_image_for_model(model_name):
     ]
     if image_files:
         local_path = os.path.join(servo_folder, image_files[0])
-        #print("Imagem encontrada:", local_path)
         return local_path
 
     # Se não houver imagem, baixa uma utilizando o GoogleImageCrawler
@@ -223,7 +221,7 @@ def on_controle_button(debug_text):
     run_program(CONTROLE_SCRIPT, debug_text, extra_arg=selected_com_port)
 
 ###############################################################################
-#                      FUNÇÕES AUXILIARES CSV / FILTROS                       #
+#                      FUNÇÕES AUXILIARES / FILTROS                           #
 ###############################################################################
 def safe_float(value):
     if value is None:
@@ -240,8 +238,11 @@ class ServoValidatorApp(ctk.CTk):
     def __init__(self):
         super().__init__()
 
+        # -- Abra a janela já maximizada --
+        self.state("zoomed")  # Em Windows normalmente funciona
+        # Se em algum Linux não funcionar, use self.attributes("-zoomed", True)
+
         self.title("Super Validador de Servos")
-        self.geometry("1500x820")
 
         # Frame superior
         self.top_frame = ctk.CTkFrame(self)
@@ -279,19 +280,25 @@ class ServoValidatorApp(ctk.CTk):
         self.left_frame.pack(side="left", fill="y", padx=5)
 
         self.btn_mola = ctk.CTkButton(
-            self.left_frame, text="Simulador Servo/Mola",
+            self.left_frame, 
+            text="Simulador Servo/Mola",
+            fg_color="green",
             command=lambda: self.run_script(MOLA_SCRIPT)
         )
         self.btn_mola.pack(pady=10)
 
         self.btn_peso = ctk.CTkButton(
-            self.left_frame, text="Simulador Servo/Peso",
+            self.left_frame, 
+            text="Simulador Servo/Peso",
+            fg_color="green",
             command=lambda: self.run_script(PESO_SCRIPT)
         )
         self.btn_peso.pack(pady=10)
 
         self.btn_aviao = ctk.CTkButton(
-            self.left_frame, text="Simulador Elevon",
+            self.left_frame, 
+            text="Simulador Elevon",
+            fg_color="green",
             command=lambda: self.run_script(AVIAO_SCRIPT)
         )
         self.btn_aviao.pack(pady=10)
@@ -300,13 +307,23 @@ class ServoValidatorApp(ctk.CTk):
         self.btn_cadastro = ctk.CTkButton(
             self.left_frame,
             text="Cadastrar Servo",
+            fg_color="green",
             command=lambda: self.run_script(CADASTRO_SCRIPT)
         )
         self.btn_cadastro.pack(pady=10)
 
+        # Novo botão: Garimpador de servo
+        self.btn_garimpador = ctk.CTkButton(
+            self.left_frame,
+            text="Garimpador de servo",
+            fg_color="green",
+            command=lambda: self.run_script(SCRAPPER_SCRIPT)
+        )
+        self.btn_garimpador.pack(pady=10)
+
         # Dropdown de portas
         self.dropdown_frame = ctk.CTkFrame(self.left_frame)
-        self.dropdown_frame.pack(pady=(15,5))
+        self.dropdown_frame.pack(pady=(15, 5))
         ctk.CTkLabel(self.dropdown_frame, text="Portas:").pack(side="left", padx=5)
 
         ports = get_serial_ports()
@@ -318,24 +335,31 @@ class ServoValidatorApp(ctk.CTk):
             self.dropdown_frame,
             values=ports,
             command=on_port_selected,
-            variable=self.port_var
+            variable=self.port_var,
+            fg_color="green",
         )
         self.combo_port.pack(side="left", padx=5)
 
         self.btn_controle = ctk.CTkButton(
-            self.left_frame, text="Controle de Servo",
+            self.left_frame, 
+            text="Controle de Servo",
+            fg_color="green",
             command=lambda: on_controle_button(self.debug_text)
         )
         self.btn_controle.pack(pady=10)
 
         self.btn_db = ctk.CTkButton(
-            self.left_frame, text="Consulta Database",
+            self.left_frame, 
+            text="Consulta Database",
+            fg_color="green",
             command=self.toggle_db_view
         )
         self.btn_db.pack(pady=10)
 
         self.btn_sair = ctk.CTkButton(
-            self.left_frame, text="Sair", fg_color="red",
+            self.left_frame, 
+            text="Sair", 
+            fg_color="red",
             command=self.on_sair
         )
         self.btn_sair.pack(side="bottom", pady=(40, 10))
@@ -367,12 +391,14 @@ class ServoValidatorApp(ctk.CTk):
         self.entry_cmd.pack(side="left", padx=5)
 
         self.btn_enviar = ctk.CTkButton(
-            self.command_frame, text="Enviar",
+            self.command_frame, 
+            text="Enviar",
+            fg_color="green",
             command=lambda: send_command_to_process(self.entry_cmd, self.debug_text)
         )
         self.btn_enviar.pack(side="left", padx=5)
 
-        # DB Frame (filtros + resultados)
+        # DB Frame (filtros + resultados) - reorganizado em colunas
         self.db_frame = ctk.CTkFrame(self.right_frame)
         self.create_db_area()
 
@@ -400,24 +426,42 @@ class ServoValidatorApp(ctk.CTk):
             self.db_frame.pack_forget()
             self.debug_frame.pack(fill="both", expand=True)
 
-    # -------------------------------
-    # Seção Database
-    # -------------------------------
+    # ------------------------------- #
+    #  Seção Database: filtros e resultados side-by-side
+    # ------------------------------- #
     def create_db_area(self):
-        self.db_title = ctk.CTkLabel(self.db_frame, text="Consulta Database de Servos", font=("Helvetica", 18, "bold"))
-        self.db_title.pack(pady=10)
+        # Título principal
+        self.db_title = ctk.CTkLabel(
+            self.db_frame, 
+            text="Consulta Database de Servos", 
+            font=("Helvetica", 22, "bold")
+        )
+        self.db_title.pack(pady=8)
 
-        self.filters_flow_frame = ctk.CTkFrame(self.db_frame, height=120)
-        self.filters_flow_frame.pack(fill="x", padx=5, pady=3)
+        # Container geral (grid: left = filtros, right = resultados)
+        self.db_container = ctk.CTkFrame(self.db_frame)
+        self.db_container.pack(fill="both", expand=True, padx=5, pady=5)
+
+        self.db_container.columnconfigure(0, minsize=310)   # Largura fixa para filtros
+        self.db_container.columnconfigure(1, weight=1)      # Expansão no results
+        self.db_container.rowconfigure(0, weight=1)
+
+        # Left: Filtros
+        self.filter_panel = ctk.CTkFrame(self.db_container, fg_color="#222222")
+        self.filter_panel.grid(row=0, column=0, sticky="nsw", padx=5, pady=5)
+
+        # Frame com fluxo (filtros)
+        self.filters_flow_frame = ctk.CTkFrame(self.filter_panel, height=500)
+        self.filters_flow_frame.pack(fill="both", padx=5, pady=3)
         self.filters_flow_frame.bind("<Configure>", self.on_filters_flow_configure)
 
         # Função auxiliar para criar blocos de filtro
         def add_filter_block(label_text):
             block_frame = ctk.CTkFrame(self.filters_flow_frame)
             lbl = ctk.CTkLabel(block_frame, text=label_text)
-            ent = ctk.CTkEntry(block_frame, width=90)
-            lbl.pack(side="left", padx=5, pady=5)
-            ent.pack(side="left", padx=5, pady=5)
+            ent = ctk.CTkEntry(block_frame, width=70)
+            lbl.pack(side="left", padx=5, pady=4)
+            ent.pack(side="left", padx=5, pady=4)
             block_frame.update_idletasks()
             return block_frame, ent
 
@@ -441,17 +485,22 @@ class ServoValidatorApp(ctk.CTk):
             self.block_price_max
         ]
 
-        self.btn_aplicar = ctk.CTkButton(self.db_frame, text="Aplicar Filtros", command=self.aplicar_filtros)
+        self.btn_aplicar = ctk.CTkButton(
+            self.filter_panel, 
+            text="Aplicar Filtros", 
+            fg_color="green",
+            command=self.aplicar_filtros
+        )
         self.btn_aplicar.pack(pady=5)
 
-        self.results_frame = ctk.CTkFrame(self.db_frame)
-        self.results_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        # Right: Resultados
+        self.results_panel = ctk.CTkFrame(self.db_container)
+        self.results_panel.grid(row=0, column=1, sticky="nsew", padx=1, pady=5)
 
-        self.servos_scrollable_frame = ctk.CTkScrollableFrame(self.results_frame)
-        self.servos_scrollable_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        self.servos_scrollable_frame = ctk.CTkScrollableFrame(self.results_panel)
+        self.servos_scrollable_frame.pack(fill="both", expand=True, padx=2, pady=2)
 
         self.servo_blocks = []
-        # Lista para armazenar os dados de carregamento das imagens (modelo e label)
         self.image_load_data = []
 
     def on_filters_flow_configure(self, event):
@@ -547,11 +596,11 @@ class ServoValidatorApp(ctk.CTk):
             self.servo_blocks.append(msg)
             return
 
-        # Cria os blocos primeiro (com placeholder para as imagens)
+        # Cria os blocos
         for idx, row in enumerate(matched_results):
             block = self.create_servo_block(row, parent=self.servos_scrollable_frame)
             row_idx = idx // 5
-            col_idx = idx % 4
+            col_idx = idx % 5
             block.grid(row=row_idx, column=col_idx, padx=10, pady=10, sticky="n")
             self.servo_blocks.append(block)
 
@@ -559,20 +608,36 @@ class ServoValidatorApp(ctk.CTk):
         self.load_all_images()
 
     def create_servo_block(self, row, parent):
-        block_frame = ctk.CTkFrame(parent, corner_radius=8, fg_color="#333333")
-        block_frame.configure(width=200, height=300)
-        
-        # Título do servo
-        make = row.get("Make", "")
-        lbl_title = ctk.CTkLabel(block_frame, text=make, font=("Helvetica", 16, "bold"))
-        lbl_title.pack(padx=5, pady=1)
+        # Cria o frame com largura/altura fixas
+        block_frame = ctk.CTkFrame(parent, corner_radius=8, fg_color="#333333", width=200, height=450)
+        # Impedir que o frame se expanda/contraia para caber o conteúdo
+        block_frame.pack_propagate(False)
+        block_frame.grid_propagate(False)
 
+        # Título (Fabricante)
+        make = row.get("Make", "")
+        lbl_title_make = ctk.CTkLabel(
+            block_frame, 
+            text=make, 
+            font=("Helvetica", 16, "bold"), 
+            width=180,
+            wraplength=180
+        )
+        lbl_title_make.pack(padx=5, pady=1)
+
+        # Modelo
         model = row.get("Model", "")
-        lbl_title = ctk.CTkLabel(block_frame, text=model, font=("Helvetica", 20, "bold"))
-        lbl_title.pack(padx=5, pady=5)
+        lbl_title_model = ctk.CTkLabel(
+            block_frame, 
+            text=model, 
+            font=("Helvetica", 20, "bold"), 
+            width=180,
+            wraplength=180
+        )
+        lbl_title_model.pack(padx=5, pady=5)
 
         # Placeholder para a imagem (quadrado fixo)
-        lbl_img = ctk.CTkLabel(block_frame, text="(Baixando Imagem da web... PERAI)", width=80, height=80)
+        lbl_img = ctk.CTkLabel(block_frame, text="(Baixando Imagem...)", width=80, height=80)
         lbl_img.pack(padx=5, pady=5)
 
         # Informações abaixo do placeholder
@@ -587,16 +652,19 @@ class ServoValidatorApp(ctk.CTk):
             desc_lines.append(f"Preço: {row.get('Typical Price')}")
         if row.get("Weight (g)"):
             desc_lines.append(f"Peso: {row.get('Weight (g)')}g")
+
         L = row.get("L (mm)") or ""
         C = row.get("C (mm)") or ""
         A = row.get("A (mm)") or ""
         if L or C or A:
             desc_lines.append(f"LxCxA: {L}x{C}x{A}mm")
+
         Tensao1 = row.get("TensãoTorque1")
         Tensao2 = row.get("TensãoTorque2")
         Tensao3 = row.get("TensãoTorque3")
         Tensao4 = row.get("TensãoTorque4")
         Tensao5 = row.get("TensãoTorque5")
+
         if Tensao1 or Tensao2 or Tensao3 or Tensao4 or Tensao5:
             desc_lines.append(f"Tensão (V) x Torque (kgf.cm)")
             if Tensao1:
@@ -609,10 +677,12 @@ class ServoValidatorApp(ctk.CTk):
                 desc_lines.append(f"    | @{Tensao4}V - {row.get('Torque4 (kgf.cm)')}kgf.m |")
             if Tensao5:
                 desc_lines.append(f"    | @{Tensao5}V - {row.get('Torque5 (kgf.cm)')}kgf.m |")
+
         desc_text = "\n".join(desc_lines)
-        lbl_desc = ctk.CTkLabel(block_frame, text=desc_text, font=("Helvetica", 15), justify="left")
+        lbl_desc = ctk.CTkLabel(block_frame, text=desc_text, font=("Helvetica", 15), justify="left", width=180, wraplength=180)
         lbl_desc.pack(padx=5, pady=5)
 
+        # Botão para datasheet
         def open_datasheet():
             datasheet_path = os.path.join("Database", "Datasheets", f"{model}.pdf")
             if os.path.exists(datasheet_path):
@@ -628,7 +698,7 @@ class ServoValidatorApp(ctk.CTk):
             else:
                 messagebox.showwarning("Aviso", "Datasheet não encontrado.")
 
-        btn_pdf = ctk.CTkButton(block_frame, text="Datasheet", command=open_datasheet)
+        btn_pdf = ctk.CTkButton(block_frame, text="Datasheet", fg_color="green", command=open_datasheet)
         btn_pdf.pack(pady=(0, 5))
 
         # Armazena os dados para carregamento posterior da imagem:
