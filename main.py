@@ -551,7 +551,7 @@ class ServoValidatorApp(ctk.CTk):
         for idx, row in enumerate(matched_results):
             block = self.create_servo_block(row, parent=self.servos_scrollable_frame)
             row_idx = idx // 5
-            col_idx = idx % 5
+            col_idx = idx % 4
             block.grid(row=row_idx, column=col_idx, padx=10, pady=10, sticky="n")
             self.servo_blocks.append(block)
 
